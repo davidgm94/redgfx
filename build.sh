@@ -1,0 +1,3 @@
+pushd out
+make
+popd
