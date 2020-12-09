@@ -63,7 +63,7 @@ static inline const char* VKResultToString(VkResult result)
     }
 }
 
-static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, const char* engine_name, const char* application_name, u32 api_version, u32 engine_version, u32 application_version, const char* const* extensions, u32 extension_count)
+static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, const char* engine_name, const char* application_name, u32 api_version, u32 engine_version, u32 application_version, const char* const* extensions, u32 extension_count, const char* const* layers, u32 layer_count)
 {
     VkApplicationInfo application_info = ZI0;
     application_info.apiVersion = api_version;
@@ -80,6 +80,8 @@ static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, cons
     create_info.pApplicationInfo = &application_info;
     create_info.ppEnabledExtensionNames = extension_count > 0 ? extensions : NULL;
     create_info.enabledExtensionCount = extension_count;
+    create_info.ppEnabledLayerNames = layer_count > 0 ? layers : NULL;
+    create_info.enabledLayerCount = layer_count;
     VkInstance instance;
     VKCHECK(vkCreateInstance(&create_info, pAllocator, &instance));
 
@@ -168,6 +170,32 @@ s32 main(s32 argc, char* argv[])
 
     VkAllocationCallbacks* pAllocator = NULL;
 
+
+
+
+
+    // Layers
+    VkLayerProperties instance_layers[200];
+    const char* used_instance_layers[200];
+    u32 instance_layer_count;
+    u32 used_instance_layer_count = 0;
+    VKCHECK(vkEnumerateInstanceLayerProperties(&instance_layer_count, null));
+    VKCHECK(vkEnumerateInstanceLayerProperties(&instance_layer_count, instance_layers));
+    print("Instance layer count = %u\n", instance_layer_count);
+    bool validation_layer_found = false;
+    for (u32 i = 0; i < instance_layer_count; i++)
+    {
+        print("%s: %s\n", instance_layers[i].layerName, instance_layers[i].description);
+        if (strcmp("VK_LAYER_KHRONOS_validation", instance_layers[i].layerName) == 0)
+        {
+            print("Found validation layer. Adding to the instance layers\n");
+            used_instance_layers[instance_layer_count++] = instance_layers[i].layerName;
+            validation_layer_found = true;
+        }
+    }
+
+    // Extensions
+
     VkExtensionProperties instance_extensions[200] = ZI0;
     const char* used_instance_extensions[200] = ZI0;
     u32 instance_extension_count;
@@ -211,7 +239,7 @@ s32 main(s32 argc, char* argv[])
 
     redassert(debug_utils_extension_found && surface_extension_found && platform_surface_extension_found);
 
-    VkInstance instance = create_instance(pAllocator, app.title, app.title, VK_API_VERSION_1_2, app.version, app.version, used_instance_extensions, used_instance_extension_count);
+    VkInstance instance = create_instance(pAllocator, app.title, app.title, VK_API_VERSION_1_2, app.version, app.version, used_instance_extensions, used_instance_extension_count, used_instance_layers, used_instance_layer_count);
     volkLoadInstanceOnly(instance);
 
     create_debug_utils_messenger(pAllocator, instance, VK_debug_callback);
