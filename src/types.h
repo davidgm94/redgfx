@@ -25,14 +25,14 @@ typedef float128_t f128;
 #define nullptr null
 #endif // !__cplusplus
 
-#define ZI0 { 0 }
+#define ZERO_INIT { 0 }
 
 #define array_length(_arr) ((sizeof(_arr))/ (sizeof(_arr[0])))
 #define CASE_TO_STR(x) case(x): return #x
 #define UNUSED_ELEM(x) x = x
 
-//#define max(a, b) (((a) >= (b)) ? (a) : (b))
-//#define min(a, b) (((a) <= (b)) ? (a) : (b))
+#define MAX(a, b) (((a) >= (b)) ? (a) : (b))
+#define MIN(a, b) (((a) <= (b)) ? (a) : (b))
 #define char_to_int(c) (((s32)c) - 48)
 
 #define A_BYTE      (1ULL)
