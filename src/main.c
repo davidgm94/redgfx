@@ -89,10 +89,6 @@ static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, cons
     return instance;
 }
 
-static inline void foo()
-{
-}
-
 static VkBool32 VK_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
 {
     if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
