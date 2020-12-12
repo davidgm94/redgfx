@@ -131,23 +131,8 @@ static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, cons
 
 static VkBool32 VK_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
 {
-    if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-    {
-        print("Error: ");
-    }
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-    {
-        print("Warning: ");
-    }
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
-    {
-        print("Info: ");
-    }
-    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
-    {
-        print("Verbose: ");
-    }
     print("%s\n", pCallbackData->pMessage);
+    redassert(!(messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT));
 
     return VK_FALSE;
 }
@@ -396,7 +381,7 @@ s32 main(s32 argc, char* argv[])
     VkDebugUtilsMessengerCreateInfoEXT debug_ci = ZERO_INIT;
     debug_ci.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     debug_ci.pfnUserCallback = VK_debug_callback;
-    debug_ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
+    debug_ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT; //| VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
     debug_ci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
 
     VkInstance instance = create_instance(pAllocator, app.title, app.title, VK_API_VERSION_1_2, app.version, app.version, used_instance_extensions, used_instance_extension_count, used_instance_layers, used_instance_layer_count, &debug_ci);
@@ -526,6 +511,7 @@ s32 main(s32 argc, char* argv[])
     {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
         .queueFamilyIndex = queue_family_index,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
     };
     VKCHECK(vkCreateCommandPool(device, &command_pool_ci, pAllocator, &command_pool));
     redassert(command_pool);
@@ -717,7 +703,7 @@ s32 main(s32 argc, char* argv[])
 
     VkFramebufferCreateInfo fb_create_info =
     {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .renderPass = render_pass,
         .attachmentCount = 1,
         .width = extent.width,
@@ -756,7 +742,9 @@ s32 main(s32 argc, char* argv[])
 
     while (!glfwWindowShouldClose(app.window.handle.glfw))
     {
+        
         glfwPollEvents();
+        print("************ NEW FRAME START ************\n");
 
         VKCHECK(vkWaitForFences(device, 1, &fence, true, 1000 * 1000 * 1000));
         VKCHECK(vkResetFences(device, 1, &fence));
@@ -829,4 +817,35 @@ s32 main(s32 argc, char* argv[])
 
         //return 0;
     }
+
+    VKCHECK(vkWaitForFences(device, 1, &fence, true, 1000 * 1000 * 1000));
+    vkDestroyFence(device, fence, pAllocator);
+    vkDestroySemaphore(device, render_sem, pAllocator);
+    vkDestroySemaphore(device, present_sem, pAllocator);
+    vkFreeCommandBuffers(device, command_pool, 1, &command_buffer);
+    vkDestroyCommandPool(device, command_pool, pAllocator);
+    for (u32 i = 0; i < MAX_PIPELINE_COUNT; i++)
+    {
+        u32 stage_count = graphics_pipelines_create_info[i].stageCount;
+        for (u32 stage = 0; stage < stage_count; stage++)
+        {
+            vkDestroyShaderModule(device, graphics_pipelines_create_info[i].pStages[stage].module, pAllocator);
+        }
+        vkDestroyPipelineLayout(device, graphics_pipelines_create_info[i].layout, pAllocator);
+        vkDestroyPipeline(device, graphics_pipelines[i], pAllocator);
+    }
+
+    vkDestroyRenderPass(device, render_pass, pAllocator);
+
+    for (u32 i = 0; i < swapchain_image_count; i++)
+    {
+        vkDestroyFramebuffer(device, framebuffers[i], pAllocator);
+        vkDestroyImageView(device, swapchain_image_views[i], pAllocator);
+    }
+
+    vkDestroySwapchainKHR(device, swapchain, pAllocator);
+    vkDestroySurfaceKHR(instance, surface, pAllocator);
+    vkDestroyDevice(device, pAllocator);
+    vkDestroyDebugUtilsMessengerEXT(instance, messenger, pAllocator);
+    vkDestroyInstance(instance, pAllocator);
 }
