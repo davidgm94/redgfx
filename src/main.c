@@ -74,7 +74,24 @@ static inline const char* VKResultToString(VkResult result)
     }
 }
 
-static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, const char* engine_name, const char* application_name, u32 api_version, u32 engine_version, u32 application_version, const char* const* extensions, u32 extension_count, const char* const* layers, u32 layer_count)
+static inline const char* present_mode_string(VkPresentModeKHR present_mode)
+{
+    switch(present_mode)
+    {
+        CASE_TO_STR(VK_PRESENT_MODE_IMMEDIATE_KHR);
+        CASE_TO_STR(VK_PRESENT_MODE_MAILBOX_KHR);
+        CASE_TO_STR(VK_PRESENT_MODE_FIFO_KHR);
+        CASE_TO_STR(VK_PRESENT_MODE_FIFO_RELAXED_KHR);
+        CASE_TO_STR(VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR);
+        CASE_TO_STR(VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR);
+        CASE_TO_STR(VK_PRESENT_MODE_MAX_ENUM_KHR);
+        default:
+            RED_NOT_IMPLEMENTED;
+            return null;
+    }
+}
+
+static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, const char* engine_name, const char* application_name, u32 api_version, u32 engine_version, u32 application_version, const char* const* extensions, u32 extension_count, const char* const* layers, u32 layer_count, VkDebugUtilsMessengerCreateInfoEXT* debug_utils)
 {
     VkApplicationInfo application_info = ZERO_INIT;
     application_info.apiVersion = api_version;
@@ -88,11 +105,13 @@ static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, cons
 
     VkInstanceCreateInfo instance_ci = ZERO_INIT;
     instance_ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instance_ci.pNext = debug_utils;
     instance_ci.pApplicationInfo = &application_info;
     instance_ci.ppEnabledExtensionNames = extension_count > 0 ? extensions : NULL;
     instance_ci.enabledExtensionCount = extension_count;
     instance_ci.ppEnabledLayerNames = layer_count > 0 ? layers : NULL;
     instance_ci.enabledLayerCount = layer_count;
+
     VkInstance instance;
     VKCHECK(vkCreateInstance(&instance_ci, pAllocator, &instance));
 
@@ -134,21 +153,7 @@ static inline VkPhysicalDevice pick_physical_device(VkPhysicalDevice* device_buf
     }
 }
 
-static inline VkDebugUtilsMessengerEXT create_debug_utils_messenger(VkAllocationCallbacks* pAllocator, VkInstance instance, PFN_vkDebugUtilsMessengerCallbackEXT callback)
-{
-    VkDebugUtilsMessengerCreateInfoEXT debug_ci = ZERO_INIT;
-    debug_ci.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    debug_ci.pfnUserCallback = callback;
-    debug_ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
-    debug_ci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-
-    VkDebugUtilsMessengerEXT messenger;
-    VKCHECK(vkCreateDebugUtilsMessengerEXT(instance, &debug_ci, pAllocator, &messenger));
-
-    return messenger;
-}
-
-static inline VkDevice create_device(VkAllocationCallbacks* pAllocator, VkPhysicalDevice pd, const char* const* device_extensions, u32 device_extension_count, u32* queue_family_indices, u32 queue_family_count, VkQueueFamilyProperties* queue_families)
+static inline VkDevice create_device(VkAllocationCallbacks* pAllocator, VkPhysicalDevice pd, const char* const* device_extensions, u32 device_extension_count, u32* queue_family_indices, u32 queue_family_count)
 {
     f32 queue_priorities[] = { 1.0f };
     VkDeviceQueueCreateInfo queue_create_infos[100] = ZERO_INIT;
@@ -167,6 +172,9 @@ static inline VkDevice create_device(VkAllocationCallbacks* pAllocator, VkPhysic
     device_ci.enabledExtensionCount = device_extension_count;
     device_ci.pQueueCreateInfos = queue_create_infos;
     device_ci.queueCreateInfoCount = queue_family_count;
+    //device_ci.enabledLayerCount = 1;
+    //char validation_layer[] = "VK_LAYER_KHRONOS_validation";
+    //device_ci.ppEnabledLayerNames = (const char* const*)&validation_layer;
 
     VkDevice device;
     VKCHECK(vkCreateDevice(pd, &device_ci, pAllocator, &device));
@@ -204,7 +212,6 @@ static inline VkSwapchainKHR create_swapchain(VkAllocationCallbacks* pAllocator,
     swapchain_ci.imageFormat = format.format;
     swapchain_ci.imageColorSpace = format.colorSpace;
     swapchain_ci.imageExtent = extent;
-    print("Image extent: %ux%u\n", swapchain_ci.imageExtent.width, swapchain_ci.imageExtent.height);
     swapchain_ci.imageArrayLayers = 1;
     swapchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     swapchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -225,7 +232,6 @@ static inline VkPipelineShaderStageCreateInfo pipeline_shader_stage_create_info(
 {
     VkPipelineShaderStageCreateInfo shader_stage_ci = 
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         .stage = shader_flags,
         .module = shader_module,
@@ -239,7 +245,6 @@ static inline VkPipelineInputAssemblyStateCreateInfo pipeline_input_assembly_cre
 {
     VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = 
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology = topology,
     };
@@ -252,7 +257,6 @@ static inline VkPipelineRasterizationStateCreateInfo rasterization_state_create_
 
     VkPipelineRasterizationStateCreateInfo rasterization_state_ci =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = polygon_mode,
         .lineWidth = 1.0f,
@@ -486,12 +490,12 @@ s32 main(s32 argc, char* argv[])
             used_instance_layers[instance_layer_count++] = instance_layers[i].layerName;
             validation_layer_found = true;
         }
-        if (strcmp("VK_LAYER_LUNARG_standard_validation", instance_layers[i].layerName) == 0)
-        {
-            print("Found validation layer. Adding to the instance layers\n");
-            used_instance_layers[instance_layer_count++] = instance_layers[i].layerName;
-            validation_layer_found = true;
-        }
+        // if (strcmp("VK_LAYER_LUNARG_standard_validation", instance_layers[i].layerName) == 0)
+        // {
+        //     print("Found validation layer. Adding to the instance layers\n");
+        //     used_instance_layers[instance_layer_count++] = instance_layers[i].layerName;
+        //     validation_layer_found = true;
+        // }
     }
 
     // Extensions
@@ -501,9 +505,6 @@ s32 main(s32 argc, char* argv[])
     u32 instance_extension_count;
     u32 used_instance_extension_count;
 
-    VKCHECK(vkEnumerateInstanceExtensionProperties(null, &instance_extension_count, null));
-    VKCHECK(vkEnumerateInstanceExtensionProperties(null, &instance_extension_count, instance_extensions));
-    print("Instance extension count = %u\n", instance_extension_count);
     u32 glfw_extension_count;
     const char** extensions = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
     if (extensions)
@@ -516,28 +517,24 @@ s32 main(s32 argc, char* argv[])
 
     used_instance_extensions[used_instance_extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 
-    VkInstance instance = create_instance(pAllocator, app.title, app.title, VK_API_VERSION_1_2, app.version, app.version, used_instance_extensions, used_instance_extension_count, used_instance_layers, used_instance_layer_count);
+    VkDebugUtilsMessengerCreateInfoEXT debug_ci = ZERO_INIT;
+    debug_ci.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    debug_ci.pfnUserCallback = VK_debug_callback;
+    debug_ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
+    debug_ci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+
+    VkInstance instance = create_instance(pAllocator, app.title, app.title, VK_API_VERSION_1_2, app.version, app.version, used_instance_extensions, used_instance_extension_count, used_instance_layers, used_instance_layer_count, &debug_ci);
     volkLoadInstanceOnly(instance);
 
-    create_debug_utils_messenger(pAllocator, instance, VK_debug_callback);
+    VkDebugUtilsMessengerEXT messenger;
+    VKCHECK(vkCreateDebugUtilsMessengerEXT(instance, &debug_ci, pAllocator, &messenger));
 
-    VkPhysicalDevice physical_devices[16] = {0};
+    VkPhysicalDevice physical_devices[16] = ZERO_INIT;
     u32 physical_device_count = array_length(physical_devices);
     VKCHECK(vkEnumeratePhysicalDevices(instance, &physical_device_count, physical_devices));
     VkPhysicalDevice pd = pick_physical_device(physical_devices, physical_device_count);
 
-    // Device Layers are deprecated in Vulkan
-    // VkLayerProperties device_layers[100];
-    // u32 device_layer_count;
-    // VKCHECK(vkEnumerateDeviceLayerProperties(pd, &device_layer_count, null));
-    // VKCHECK(vkEnumerateDeviceLayerProperties(pd, &device_layer_count, device_layers));
-    // print("Device layer count: %u\n", device_layer_count);
-    // for (u32 i = 0; i < device_layer_count; i++)
-    // {
-    //     print("%s: %s\n", device_layers[i].layerName, device_layers[i].description);
-    // }
-
-    // Extensions
+    // Device extensions
     VkExtensionProperties device_extensions[1024];
     u32 device_extension_count;
     const char* used_device_extensions[1024];
@@ -545,10 +542,10 @@ s32 main(s32 argc, char* argv[])
     VKCHECK(vkEnumerateDeviceExtensionProperties(pd, null, &device_extension_count, null));
     VKCHECK(vkEnumerateDeviceExtensionProperties(pd, null, &device_extension_count, device_extensions));
     bool swapchain_extension_found = false;
-    print("Device extension count: %u\n", device_extension_count);
+    //print("Device extension count: %u\n", device_extension_count);
     for (u32 i = 0; i < device_extension_count; i++)
     {
-        print("%s\n", device_extensions[i].extensionName);
+        //print("%s\n", device_extensions[i].extensionName);
         if (strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME, device_extensions[i].extensionName) == 0)
         {
             print("Found swapchain device extension\n");
@@ -559,10 +556,10 @@ s32 main(s32 argc, char* argv[])
     }
 
     redassert(swapchain_extension_found);
-    // VkDisplayPropertiesKHR display_properties[100];
-    // u32 display_property_count;
-    // VKCHECK(vkGetPhysicalDeviceDisplayPropertiesKHR(pd, &display_property_count, null));
-    // VKCHECK(vkGetPhysicalDeviceDisplayPropertiesKHR(pd, &display_property_count, display_properties));
+
+    VkSurfaceKHR surface;
+    VKCHECK(glfwCreateWindowSurface(instance, window, pAllocator, &surface));
+    redassert(surface);
 
     VkPhysicalDeviceFeatures device_features;
     vkGetPhysicalDeviceFeatures(pd, &device_features);
@@ -576,20 +573,20 @@ s32 main(s32 argc, char* argv[])
     VkQueueFamilyProperties the_queue_family;
     for (u32 i = 0; i < device_queue_family_count; i++)
     {
-        VkQueueFamilyProperties* queue_family = &device_queue_families[i];
-        if (queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT)
+        VkQueueFamilyProperties queue_family = device_queue_families[i];
+
+        VkBool32 present_support;
+        vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, surface, &present_support);
+        if (queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT && present_support)
         {
             queue_family_index = i;
-            the_queue_family = *queue_family;
+            the_queue_family = queue_family;
         }
     }
 
     redassert(queue_family_index != UINT32_MAX);
 
-    VkSurfaceKHR surface;
-    VKCHECK(glfwCreateWindowSurface(instance, window, pAllocator, &surface));
-
-    VkDevice device = create_device(pAllocator, pd, used_device_extensions, used_device_extension_count, &queue_family_index, 1, &the_queue_family);
+    VkDevice device = create_device(pAllocator, pd, used_device_extensions, used_device_extension_count, &queue_family_index, 1);
     volkLoadDevice(device);
 
     VkSurfaceFormatKHR surface_formats[100];
@@ -602,7 +599,18 @@ s32 main(s32 argc, char* argv[])
     VKCHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pd, surface, &surface_capabilities));
     VkExtent2D extent = surface_capabilities.currentExtent;
 
+    VkPresentModeKHR present_modes[64];
+    u32 present_mode_count;
+    VKCHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(pd, surface, &present_mode_count, null));
+    VKCHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(pd, surface, &present_mode_count, present_modes));
+    for (u32 i = 0; i < present_mode_count; i++)
+    {
+        VkPresentModeKHR present_mode = present_modes[i];
+        print("Present mode: %s\n", present_mode_string(present_mode));
+    }
+
     VkSwapchainKHR swapchain = create_swapchain(pAllocator, device, surface, surface_capabilities, surface_format, extent, queue_family_index);
+    redassert(swapchain);
 
     VkImage swapchain_images[16];
     u32 swapchain_image_count;
@@ -629,6 +637,7 @@ s32 main(s32 argc, char* argv[])
         create_info.subresourceRange.levelCount = 1;
         
         VKCHECK(vkCreateImageView(device, &create_info, pAllocator, &swapchain_image_views[i]));
+        redassert(swapchain_image_views[i]);
     }
 
     VkQueue queue;
@@ -637,45 +646,58 @@ s32 main(s32 argc, char* argv[])
     redassert(queue);
 
     VkCommandPool command_pool;
-    VkCommandPoolCreateInfo cb_create_info = ZERO_INIT;
-    cb_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    cb_create_info.queueFamilyIndex = queue_family_index;
-    VKCHECK(vkCreateCommandPool(device, &cb_create_info, pAllocator, &command_pool));
+    VkCommandPoolCreateInfo command_pool_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = queue_family_index,
+    };
+    VKCHECK(vkCreateCommandPool(device, &command_pool_ci, pAllocator, &command_pool));
+    redassert(command_pool);
 
     VkCommandBuffer command_buffer;
-    VkCommandBufferAllocateInfo allocate_info = ZERO_INIT;
-    allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocate_info.commandPool = command_pool;
-    allocate_info.commandBufferCount = 1;
-    allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    VkCommandBufferAllocateInfo command_buffer_ai =
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = command_pool,
+        .commandBufferCount = 1,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    };
 
-    VKCHECK(vkAllocateCommandBuffers(device, &allocate_info, &command_buffer));
+    VKCHECK(vkAllocateCommandBuffers(device, &command_buffer_ai, &command_buffer));
 
-    VkAttachmentDescription color_attachment = ZERO_INIT;
-    color_attachment.format = surface_format.format;
-    color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkAttachmentDescription color_attachment =
+    {
+        .format = surface_format.format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    };
 
-    VkAttachmentReference color_attachment_ref = ZERO_INIT;
-    color_attachment_ref.attachment = 0;
-    color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference color_attachment_ref =
+    {
+        .attachment = 0,
+        .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    };
 
-    VkSubpassDescription subpass_desc = ZERO_INIT;
-    subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass_desc.colorAttachmentCount = 1;
-    subpass_desc.pColorAttachments = &color_attachment_ref;
+    VkSubpassDescription subpass_desc =
+    {
+        .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_attachment_ref,
+    };
 
-    VkRenderPassCreateInfo rp_create_info = ZERO_INIT;
-    rp_create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    rp_create_info.pAttachments = &color_attachment;
-    rp_create_info.attachmentCount = 1;
-    rp_create_info.pSubpasses = &subpass_desc;
-    rp_create_info.subpassCount = 1;
+    VkRenderPassCreateInfo rp_create_info =
+    {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+        .pAttachments = &color_attachment,
+        .attachmentCount = 1,
+        .pSubpasses = &subpass_desc,
+        .subpassCount = 1,
+    };
 
     VkRenderPass render_pass;
     VKCHECK(vkCreateRenderPass(device, &rp_create_info, pAllocator, &render_pass));
@@ -702,14 +724,13 @@ s32 main(s32 argc, char* argv[])
 
         const u32* spirv_code_ptr = (const u32*)file->ptr;
         // 
-        u32 spirv_code_size = spirv_byte_count * sizeof(u32);
+        u32 spirv_code_size = spirv_byte_count;
 
         VkShaderStageFlagBits shader_stage = hardcoded_shader_stages[i];
         redassert(shader_stage);
 
         VkShaderModuleCreateInfo ci = 
         {
-            0,
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
             .pCode = spirv_code_ptr,
             .codeSize = spirv_code_size,
@@ -723,7 +744,6 @@ s32 main(s32 argc, char* argv[])
 
     VkPipelineVertexInputStateCreateInfo vertex_input_state_ci =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     };
 
@@ -733,7 +753,6 @@ s32 main(s32 argc, char* argv[])
 
     VkPipelineMultisampleStateCreateInfo multisample_state_ci =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
         .minSampleShading = 1.0f,
@@ -741,22 +760,17 @@ s32 main(s32 argc, char* argv[])
 
     VkPipelineColorBlendAttachmentState color_blend_attachment_state_ci =
     {
-        0,
         .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
     };
 
     VkPipelineLayoutCreateInfo pipeline_layout_ci =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
     };
 
-    VkPipelineLayout pipeline_layout;
-    VKCHECK(vkCreatePipelineLayout(device, &pipeline_layout_ci, pAllocator, &pipeline_layout));
 
     VkPipelineColorBlendStateCreateInfo color_blend_state_ci =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         .logicOp = VK_LOGIC_OP_COPY,
         .attachmentCount = 1,
@@ -778,14 +792,11 @@ s32 main(s32 argc, char* argv[])
     VkRect2D scissor =
     {
         .extent = extent,
-        .offset.x = 0,
-        .offset.y = 0,
     };
     print("Scissor\n");
 
     VkPipelineViewportStateCreateInfo viewport_state_ci =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .viewportCount = 1,
         .pViewports = &viewport,
@@ -794,9 +805,11 @@ s32 main(s32 argc, char* argv[])
     };
     print("Viewport state\n");
 
+    VkPipelineLayout pipeline_layout;
+    VKCHECK(vkCreatePipelineLayout(device, &pipeline_layout_ci, pAllocator, &pipeline_layout));
+
     VkGraphicsPipelineCreateInfo graphics_pipeline_ci =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = shader_count,
         .pStages = shader_stages,
@@ -809,17 +822,16 @@ s32 main(s32 argc, char* argv[])
         .layout = pipeline_layout,
         .renderPass = render_pass,
         .subpass = 0,
-        .basePipelineHandle = VK_NULL_HANDLE,
     };
     
     print("Reached before pipeline creation\n");
     VkPipeline graphics_pipeline;
-    VKCHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &graphics_pipeline_ci, pAllocator, &graphics_pipeline));
+    VKCHECK(vkCreateGraphicsPipelines(device, null, 1, &graphics_pipeline_ci, pAllocator, &graphics_pipeline));
     print("Created graphics pipeline\n");
+
 
     VkFramebufferCreateInfo fb_create_info =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .renderPass = render_pass,
         .attachmentCount = 1,
@@ -838,7 +850,6 @@ s32 main(s32 argc, char* argv[])
 
     VkFenceCreateInfo fence_create_info =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT,
     };
@@ -848,7 +859,6 @@ s32 main(s32 argc, char* argv[])
 
     VkSemaphoreCreateInfo sem_create_info =
     {
-        0,
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     };
 
@@ -873,7 +883,6 @@ s32 main(s32 argc, char* argv[])
 
         VkCommandBufferBeginInfo begin_info =
         {
-            0,
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         };
@@ -886,7 +895,6 @@ s32 main(s32 argc, char* argv[])
 
         VkRenderPassBeginInfo rp_begin_info =
         {
-            0,
             .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
             .renderPass = render_pass,
             .renderArea.extent = extent,
@@ -908,7 +916,6 @@ s32 main(s32 argc, char* argv[])
         VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo submit_info =
         {
-            0,
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pWaitDstStageMask = &wait_stage,
             .waitSemaphoreCount = 1,
@@ -923,7 +930,6 @@ s32 main(s32 argc, char* argv[])
 
         VkPresentInfoKHR present_info =
         {
-            0,
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pSwapchains = &swapchain,
             .swapchainCount = 1,
