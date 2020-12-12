@@ -4,6 +4,7 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include <math.h>
+#include <vulkan/vulkan_core.h>
 #ifdef RED_OS_WINDOWS
 #include <spirv-headers/spirv.h>
 #else
@@ -256,6 +257,7 @@ static inline VkPipelineRasterizationStateCreateInfo rasterization_state_create_
         .polygonMode = polygon_mode,
         .lineWidth = 1.0f,
         .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .cullMode = VK_CULL_MODE_NONE,
     };
 
     return rasterization_state_ci;
@@ -683,13 +685,13 @@ s32 main(s32 argc, char* argv[])
         "trianglev.spv",
         "trianglef.spv",
     };
-    const u32 shader_count = array_length(shader_filenames);
-    VkShaderStageFlagBits hardcoded_shader_stages[shader_count] =
+    VkShaderStageFlagBits hardcoded_shader_stages[array_length(shader_filenames)] =
     {
         VK_SHADER_STAGE_VERTEX_BIT,
         VK_SHADER_STAGE_FRAGMENT_BIT,
     };
-    VkPipelineShaderStageCreateInfo shader_stages[shader_count];
+    VkPipelineShaderStageCreateInfo shader_stages[array_length(shader_filenames)];
+    u32 shader_count = array_length(shader_filenames);
 
     for (u32 i = 0; i < array_length(shader_filenames); i++)
     {
@@ -776,7 +778,8 @@ s32 main(s32 argc, char* argv[])
     VkRect2D scissor =
     {
         .extent = extent,
-        .offset = {0},
+        .offset.x = 0,
+        .offset.y = 0,
     };
     print("Scissor\n");
 
@@ -798,6 +801,7 @@ s32 main(s32 argc, char* argv[])
         .stageCount = shader_count,
         .pStages = shader_stages,
         .pVertexInputState = &vertex_input_state_ci,
+        .pInputAssemblyState = &input_assembly_ci,
         .pViewportState = &viewport_state_ci,
         .pRasterizationState = &rasterization_state_ci,
         .pMultisampleState = &multisample_state_ci, 
@@ -895,6 +899,7 @@ s32 main(s32 argc, char* argv[])
 
         /***** BEGIN RENDER ******/
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
+        vkCmdDraw(command_buffer, 3, 1, 0, 0);
         /***** END RENDER ******/
 
         vkCmdEndRenderPass(command_buffer);
