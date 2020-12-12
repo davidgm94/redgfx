@@ -186,7 +186,7 @@ s64 os_performance_counter(void);
 f64 os_compute_ms(u64 pc_start, u64 pc_end);
 s32 os_load_dynamic_library(const char* dyn_lib_name);
 void* os_load_procedure_from_dynamic_library(s32 dyn_lib_index, const char* proc_name);
-StringBuffer* os_file_load(const char* name);
+StringBuffer* os_file_load(const char *name);
 
 
 

@@ -39,7 +39,7 @@ add_custom_target(shaders
 add_executable(redgfx ${REDGFX_SOURCE})
 add_dependencies(redgfx shaders)
 target_compile_definitions(redgfx PUBLIC RED_DEBUG VK_USE_PLATFORM_XCB_KHR GLFW_EXPOSE_NATIVE_X11)
-target_compile_options(redgfx PUBLIC -Wno-initializer-overrides)
+target_compile_options(redgfx PUBLIC -Wno-initializer-overrides -Werror=vla)
 target_link_libraries(redgfx PUBLIC ${Vulkan_LIBRARIES} glfw dl m)
 target_link_options(redgfx PUBLIC -rdynamic) # This linker flag gives more debugging information at run-time for logging purposes
 

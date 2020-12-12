@@ -173,7 +173,16 @@ void* os_ask_virtual_memory_block_with_address(void* target_address, size_t bloc
     address = VirtualAlloc(target_address, block_bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 #elif defined(RED_OS_LINUX)
     // If the address could not be satisfied, the allocation fails!
-    address = mmap(target_address, block_bytes, PROT_READ | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    u32 flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    if (target_address != NULL)
+    {
+        flags |= MAP_FIXED;
+    }
+    address = mmap(target_address, block_bytes, PROT_WRITE | PROT_READ, flags, -1, 0);
+    if (address == MAP_FAILED)
+    {
+        address = null;
+    }
 #else
 #error
 #endif
@@ -372,51 +381,61 @@ void sb_vprintf(SB* sb, const char* format, va_list ap)
     va_end(ap2);
 }
 
+
 StringBuffer* os_file_load(const char *name)
 {
     s32 rc;
     FILE *file = fopen(name, "rb");
     if (!file)
+    {
+        print("File %s not found\n", name);
         return NULL;
+    }
 
     rc = fseek(file, 0, SEEK_END);
     if (rc) // not zero
     {
+        print("Cannot reach the end of the file %s\n", name);
         return NULL;
     }
     size_t length = ftell(file);
+
     StringBuffer* file_buffer = sb_alloc_fixed(length);
     
     if (!file_buffer)
+    {
+        print("Could not allocate memory for file %s\n", name);
         return NULL;
+    }
     rc = fseek(file, 0, SEEK_SET);
     if (rc) // not zero
     {
+        print("Could not EOF for file %s\n", name);
         return NULL;
     }
 
     rc = fread(sb_ptr(file_buffer), 1, length, file);
     if (rc != (size_t) length)
     {
+        print("Read characters differ from %s file length\n", name);
         return NULL;
     }
 
     rc = fclose(file);
     if (rc) // not zero
     {
+        print("Error closing file %s\n", name);
         return NULL;
     }
 
     return file_buffer;
 }
 
-
 typedef enum AllocationResult
 {
     ALLOCATION_RESULT_ERROR,
     ALLOCATION_RESULT_SUCCESS,
 } AllocationResult;
-
 
 // @NOT_USED
 //static inline usize round_up_to_next_page(usize size, usize page_size)
@@ -468,7 +487,7 @@ static inline Allocation* find_allocation_metadata(void* visible_address)
 //    }
 //}
 
-static inline void allocate_new_block()
+static inline void allocate_new_block(void)
 {
     void* target_address = NULL;
     if (m_page_allocator.allocation_count > 0)
@@ -490,7 +509,11 @@ static inline void allocate_new_block()
     if (address)
     {
         void* aligned_address = align_address(address, BLOCK_ALIGNMENT);
-        redassert(aligned_address == address);
+        if (aligned_address != address)
+        {
+            print("Aligned address is %p, raw address is %p\n", aligned_address, address);
+            redassert(aligned_address == address);
+        }
         usize lost_memory = (uptr)aligned_address - (uptr)address;
         redassert(lost_memory == 0);
         usize aligned_size = BLOCK_SIZE - lost_memory;

@@ -4,7 +4,15 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include <math.h>
+#include <spirv/1.2/spirv.h>
 #include <vulkan/vulkan_core.h>
+
+typedef struct Application
+{
+    char* title;
+    s32 width, height;
+    u32 version;
+} Application;
 
 #define VKCHECK(_result) do { VkResult result = _result; if (result == VK_SUCCESS) { print("%s OK\n", #_result); } else { print("%s FAIL! %s\n", #_result, VKResultToString(_result)); redassert(result == VK_SUCCESS); } } while(false);
 
@@ -36,9 +44,7 @@ static inline const char* VKResultToString(VkResult result)
         CASE_TO_STR(VK_ERROR_FRAGMENTATION);
         CASE_TO_STR(VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS);
         CASE_TO_STR(VK_ERROR_SURFACE_LOST_KHR);
-        CASE_TO_STR(VK_ERROR_NATIVE_WINDOW_IN_USE_KHR);
-        CASE_TO_STR(VK_SUBOPTIMAL_KHR);
-        CASE_TO_STR(VK_ERROR_OUT_OF_DATE_KHR);
+        CASE_TO_STR(VK_ERROR_NATIVE_WINDOW_IN_USE_KHR); CASE_TO_STR(VK_SUBOPTIMAL_KHR); CASE_TO_STR(VK_ERROR_OUT_OF_DATE_KHR);
         CASE_TO_STR(VK_ERROR_INCOMPATIBLE_DISPLAY_KHR);
         CASE_TO_STR(VK_ERROR_VALIDATION_FAILED_EXT);
         CASE_TO_STR(VK_ERROR_INVALID_SHADER_NV);
@@ -76,15 +82,15 @@ static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, cons
     application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     application_info.applicationVersion = 1;
 
-    VkInstanceCreateInfo create_info = ZERO_INIT;
-    create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    create_info.pApplicationInfo = &application_info;
-    create_info.ppEnabledExtensionNames = extension_count > 0 ? extensions : NULL;
-    create_info.enabledExtensionCount = extension_count;
-    create_info.ppEnabledLayerNames = layer_count > 0 ? layers : NULL;
-    create_info.enabledLayerCount = layer_count;
+    VkInstanceCreateInfo instance_ci = ZERO_INIT;
+    instance_ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instance_ci.pApplicationInfo = &application_info;
+    instance_ci.ppEnabledExtensionNames = extension_count > 0 ? extensions : NULL;
+    instance_ci.enabledExtensionCount = extension_count;
+    instance_ci.ppEnabledLayerNames = layer_count > 0 ? layers : NULL;
+    instance_ci.enabledLayerCount = layer_count;
     VkInstance instance;
-    VKCHECK(vkCreateInstance(&create_info, pAllocator, &instance));
+    VKCHECK(vkCreateInstance(&instance_ci, pAllocator, &instance));
 
     return instance;
 }
@@ -126,14 +132,14 @@ static inline VkPhysicalDevice pick_physical_device(VkPhysicalDevice* device_buf
 
 static inline VkDebugUtilsMessengerEXT create_debug_utils_messenger(VkAllocationCallbacks* pAllocator, VkInstance instance, PFN_vkDebugUtilsMessengerCallbackEXT callback)
 {
-    VkDebugUtilsMessengerCreateInfoEXT create_info = ZERO_INIT;
-    create_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    create_info.pfnUserCallback = callback;
-    create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
-    create_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+    VkDebugUtilsMessengerCreateInfoEXT debug_ci = ZERO_INIT;
+    debug_ci.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    debug_ci.pfnUserCallback = callback;
+    debug_ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT;
+    debug_ci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
 
     VkDebugUtilsMessengerEXT messenger;
-    VKCHECK(vkCreateDebugUtilsMessengerEXT(instance, &create_info, pAllocator, &messenger));
+    VKCHECK(vkCreateDebugUtilsMessengerEXT(instance, &debug_ci, pAllocator, &messenger));
 
     return messenger;
 }
@@ -151,15 +157,15 @@ static inline VkDevice create_device(VkAllocationCallbacks* pAllocator, VkPhysic
         queue_create_infos[i].pQueuePriorities = queue_priorities;
     }
 
-    VkDeviceCreateInfo create_info = ZERO_INIT;
-    create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    create_info.ppEnabledExtensionNames = device_extension_count > 0 ? device_extensions : NULL;
-    create_info.enabledExtensionCount = device_extension_count;
-    create_info.pQueueCreateInfos = queue_create_infos;
-    create_info.queueCreateInfoCount = queue_family_count;
+    VkDeviceCreateInfo device_ci = ZERO_INIT;
+    device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    device_ci.ppEnabledExtensionNames = device_extension_count > 0 ? device_extensions : NULL;
+    device_ci.enabledExtensionCount = device_extension_count;
+    device_ci.pQueueCreateInfos = queue_create_infos;
+    device_ci.queueCreateInfoCount = queue_family_count;
 
     VkDevice device;
-    VKCHECK(vkCreateDevice(pd, &create_info, pAllocator, &device));
+    VKCHECK(vkCreateDevice(pd, &device_ci, pAllocator, &device));
     return device;
 }
 
@@ -187,36 +193,256 @@ static inline VkSwapchainKHR create_swapchain(VkAllocationCallbacks* pAllocator,
 		: VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
 
 
-    VkSwapchainCreateInfoKHR create_info = ZERO_INIT;
-    create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    create_info.surface = surface;
-    create_info.minImageCount = MAX(2, surface_capabilities.minImageCount);
-    create_info.imageFormat = format.format;
-    create_info.imageColorSpace = format.colorSpace;
-    create_info.imageExtent = extent;
-    print("Image extent: %ux%u\n", create_info.imageExtent.width, create_info.imageExtent.height);
-    create_info.imageArrayLayers = 1;
-    create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    create_info.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    create_info.compositeAlpha = surface_composite;
-    create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    create_info.clipped = VK_TRUE;
-    create_info.pQueueFamilyIndices = &queue_family_index;
-    create_info.queueFamilyIndexCount = 1;
+    VkSwapchainCreateInfoKHR swapchain_ci = ZERO_INIT;
+    swapchain_ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchain_ci.surface = surface;
+    swapchain_ci.minImageCount = MAX(2, surface_capabilities.minImageCount);
+    swapchain_ci.imageFormat = format.format;
+    swapchain_ci.imageColorSpace = format.colorSpace;
+    swapchain_ci.imageExtent = extent;
+    print("Image extent: %ux%u\n", swapchain_ci.imageExtent.width, swapchain_ci.imageExtent.height);
+    swapchain_ci.imageArrayLayers = 1;
+    swapchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchain_ci.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    swapchain_ci.compositeAlpha = surface_composite;
+    swapchain_ci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    swapchain_ci.clipped = VK_TRUE;
+    swapchain_ci.pQueueFamilyIndices = &queue_family_index;
+    swapchain_ci.queueFamilyIndexCount = 1;
 
     VkSwapchainKHR swapchain;
-    VKCHECK(vkCreateSwapchainKHR(device, &create_info, pAllocator, &swapchain));
+    VKCHECK(vkCreateSwapchainKHR(device, &swapchain_ci, pAllocator, &swapchain));
 
     return swapchain;
 }
 
-typedef struct Application
+static inline VkPipelineShaderStageCreateInfo pipeline_shader_stage_create_info(VkShaderStageFlagBits shader_flags, VkShaderModule shader_module)
 {
-    char* title;
-    s32 width, height;
-    u32 version;
-} Application;
+    VkPipelineShaderStageCreateInfo shader_stage_ci = 
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = shader_flags,
+        .module = shader_module,
+        .pName = "main",
+    };
+
+    return shader_stage_ci;
+}
+
+static inline VkPipelineInputAssemblyStateCreateInfo pipeline_input_assembly_create_info(VkPrimitiveTopology topology)
+{
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = 
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = topology,
+    };
+
+    return input_assembly_ci;
+}
+
+static inline VkPipelineRasterizationStateCreateInfo rasterization_state_create_info(VkPolygonMode polygon_mode)
+{
+
+    VkPipelineRasterizationStateCreateInfo rasterization_state_ci =
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = polygon_mode,
+        .lineWidth = 1.0f,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+    };
+
+    return rasterization_state_ci;
+}
+
+typedef struct SpirVToken
+{
+    u32 op_code;
+    u32 type_id;
+    u32 storage_class;
+    u32 binding;
+    u32 set;
+} SpirVToken;
+
+static inline VkShaderStageFlagBits get_shader_stage(SpvExecutionModel execution_model)
+{
+    switch (execution_model)
+    {
+        case SpvExecutionModelVertex:
+            return VK_SHADER_STAGE_VERTEX_BIT;
+        case SpvExecutionModelFragment:
+            return VK_SHADER_STAGE_FRAGMENT_BIT;
+        case SpvExecutionModelGLCompute:
+            return VK_SHADER_STAGE_COMPUTE_BIT;
+        default:
+            RED_UNREACHABLE;
+            return 0;
+    }
+}
+
+typedef struct Shader
+{
+    VkDescriptorType resource_types[32];
+    u32 resource_mask;
+    u32 local_size_x;
+    u32 local_size_y;
+    u32 local_size_z;
+    bool uses_push_constants;
+} Shader;
+
+static inline Shader parse_shader(const u32* code, u32 codeSize, VkShaderStageFlagBits* shader_stage)
+{
+    Shader shader = ZERO_INIT;
+	redassert(code[0] == SpvMagicNumber);
+
+	u32 token_count = code[3];
+    print("Token count = %u\n", token_count);
+
+    SpirVToken tokens[1000];
+	const u32* insn = code + 5;
+
+    u32 first_iteration_count = 0;
+	while (insn != code + codeSize)
+	{
+        print("Condition iterator: %u. Target: %u\n", insn, code + codeSize);
+		u16 op_code = (u16)(insn[0]);
+		u16 wordCount = (u16)(insn[0] >> 16);
+
+		switch (op_code)
+		{
+		case SpvOpEntryPoint:
+		{
+			redassert(wordCount >= 2);
+			*shader_stage = get_shader_stage((SpvExecutionModel)(insn[1]));
+            return shader;
+		} break;
+		case SpvOpExecutionMode:
+		{
+			redassert(wordCount >= 3);
+			u32 mode = insn[2];
+
+			switch (mode)
+			{
+			case SpvExecutionModeLocalSize:
+				redassert(wordCount == 6);
+				shader.local_size_x = insn[3];
+				shader.local_size_y = insn[4];
+				shader.local_size_z = insn[5];
+				break;
+			}
+		} break;
+		case SpvOpDecorate:
+		{
+			redassert(wordCount >= 3);
+
+			u32 id = insn[1];
+			redassert(id < token_count);
+
+			switch (insn[2])
+			{
+			case SpvDecorationDescriptorSet:
+				redassert(wordCount == 4);
+				tokens[id].set = insn[3];
+				break;
+			case SpvDecorationBinding:
+				redassert(wordCount == 4);
+				tokens[id].binding = insn[3];
+				break;
+			}
+		} break;
+		case SpvOpTypeStruct:
+		case SpvOpTypeImage:
+		case SpvOpTypeSampler:
+		case SpvOpTypeSampledImage:
+		{
+			redassert(wordCount >= 2);
+
+			u32 id = insn[1];
+			redassert(id < token_count);
+
+			redassert(tokens[id].op_code == 0);
+			tokens[id].op_code = op_code;
+		} break;
+		case SpvOpTypePointer:
+		{
+			redassert(wordCount == 4);
+
+			u32 id = insn[1];
+			redassert(id < token_count);
+
+			redassert(tokens[id].op_code == 0);
+			tokens[id].op_code = op_code;
+			tokens[id].type_id = insn[3];
+			tokens[id].storage_class = insn[2];
+		} break;
+		case SpvOpVariable:
+		{
+			redassert(wordCount >= 4);
+
+			u32 id = insn[2];
+			redassert(id < token_count);
+
+			redassert(tokens[id].op_code == 0);
+			tokens[id].op_code = op_code;
+			tokens[id].type_id = insn[1];
+			tokens[id].storage_class = insn[3];
+		} break;
+		}
+
+		redassert(insn + wordCount <= code + codeSize);
+		insn += wordCount;
+        //print("First loop iteration count = %u\n", ++first_iteration_count);
+	}
+
+    for (u32 i = 0; i < token_count; i++)
+    {
+        SpirVToken token = tokens[i];
+		if (token.op_code == SpvOpVariable && (token.storage_class == SpvStorageClassUniform || token.storage_class == SpvStorageClassUniformConstant || token.storage_class == SpvStorageClassStorageBuffer))
+		{
+			redassert(token.set == 0);
+			redassert(token.binding < 32);
+			redassert(tokens[token.type_id].op_code == SpvOpTypePointer);
+
+			redassert((shader.resource_mask & (1 << token.binding)) == 0);
+
+			u32 typeKind = tokens[tokens[token.type_id].type_id].op_code;
+
+			switch (typeKind)
+			{
+			case SpvOpTypeStruct:
+				shader.resource_types[token.binding] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+				shader.resource_mask |= 1 << token.binding;
+				break;
+			case SpvOpTypeImage:
+				shader.resource_types[token.binding] = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+				shader.resource_mask |= 1 << token.binding;
+				break;
+			case SpvOpTypeSampler:
+				shader.resource_types[token.binding] = VK_DESCRIPTOR_TYPE_SAMPLER;
+				shader.resource_mask |= 1 << token.binding;
+				break;
+			case SpvOpTypeSampledImage:
+				shader.resource_types[token.binding] = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				shader.resource_mask |= 1 << token.binding;
+				break;
+			default:
+				redassert(!"Unknown resource type");
+			}
+		}
+
+		if (token.op_code == SpvOpVariable && token.storage_class == SpvStorageClassPushConstant)
+		{
+			shader.uses_push_constants = true;
+		}
+	}
+
+    print("Ended parsing a shader\n");
+
+    return shader;
+}
 
 s32 main(s32 argc, char* argv[])
 {
@@ -466,6 +692,141 @@ s32 main(s32 argc, char* argv[])
     VkRenderPass render_pass;
     VKCHECK(vkCreateRenderPass(device, &rp_create_info, pAllocator, &render_pass));
 
+    const char* shader_filenames[] =
+    {
+        "trianglev.spv",
+        "trianglef.spv",
+    };
+    const u32 shader_count = array_length(shader_filenames);
+    VkShaderStageFlagBits hardcoded_shader_stages[shader_count] =
+    {
+        VK_SHADER_STAGE_VERTEX_BIT,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+    VkPipelineShaderStageCreateInfo shader_stages[shader_count];
+
+    for (u32 i = 0; i < array_length(shader_filenames); i++)
+    {
+        SB* file = os_file_load(shader_filenames[i]);
+        redassert(file);
+        u32 spirv_byte_count = file->len - 1;
+        redassert(spirv_byte_count % sizeof(u32) == 0);
+
+        const u32* spirv_code_ptr = (const u32*)file->ptr;
+        // 
+        u32 spirv_code_size = spirv_byte_count * sizeof(u32);
+
+        VkShaderStageFlagBits shader_stage = hardcoded_shader_stages[i];
+        redassert(shader_stage);
+
+        VkShaderModuleCreateInfo ci = 
+        {
+            0,
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .pCode = spirv_code_ptr,
+            .codeSize = spirv_code_size,
+        };
+
+        VkShaderModule shader_module;
+        VKCHECK(vkCreateShaderModule(device, &ci, pAllocator, &shader_module));
+
+        shader_stages[i] = pipeline_shader_stage_create_info(shader_stage, shader_module);
+    }
+
+    VkPipelineVertexInputStateCreateInfo vertex_input_state_ci =
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = pipeline_input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+
+    VkPipelineRasterizationStateCreateInfo rasterization_state_ci = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
+
+    VkPipelineMultisampleStateCreateInfo multisample_state_ci =
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        .minSampleShading = 1.0f,
+    };
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment_state_ci =
+    {
+        0,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+    };
+
+    VkPipelineLayoutCreateInfo pipeline_layout_ci =
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    };
+
+    VkPipelineLayout pipeline_layout;
+    VKCHECK(vkCreatePipelineLayout(device, &pipeline_layout_ci, pAllocator, &pipeline_layout));
+
+    VkPipelineColorBlendStateCreateInfo color_blend_state_ci =
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .logicOp = VK_LOGIC_OP_COPY,
+        .attachmentCount = 1,
+        .pAttachments = &color_blend_attachment_state_ci,
+    };
+    print("Color blend\n");
+
+    VkViewport viewport =
+    {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width = (f32) extent.width,
+        .height = (f32) extent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+    print("Viewport\n");
+
+    VkRect2D scissor =
+    {
+        .extent = extent,
+        .offset = {0},
+    };
+    print("Scissor\n");
+
+    VkPipelineViewportStateCreateInfo viewport_state_ci =
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .pViewports = &viewport,
+        .scissorCount = 1,
+        .pScissors = &scissor,
+    };
+    print("Viewport state\n");
+
+    VkGraphicsPipelineCreateInfo graphics_pipeline_ci =
+    {
+        0,
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = shader_count,
+        .pStages = shader_stages,
+        .pVertexInputState = &vertex_input_state_ci,
+        .pViewportState = &viewport_state_ci,
+        .pRasterizationState = &rasterization_state_ci,
+        .pMultisampleState = &multisample_state_ci, 
+        .pColorBlendState = &color_blend_state_ci,
+        .layout = pipeline_layout,
+        .renderPass = render_pass,
+        .subpass = 0,
+        .basePipelineHandle = VK_NULL_HANDLE,
+    };
+    
+    print("Reached before pipeline creation\n");
+    VkPipeline graphics_pipeline;
+    VKCHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &graphics_pipeline_ci, pAllocator, &graphics_pipeline));
+    print("Created graphics pipeline\n");
+
     VkFramebufferCreateInfo fb_create_info =
     {
         0,
@@ -504,6 +865,7 @@ s32 main(s32 argc, char* argv[])
     VkSemaphore render_sem, present_sem;
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &render_sem));
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &present_sem));
+
 
     u32 frame_number = 0;
 
@@ -544,6 +906,10 @@ s32 main(s32 argc, char* argv[])
         };
 
         vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+        /***** BEGIN RENDER ******/
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
+        /***** END RENDER ******/
 
         vkCmdEndRenderPass(command_buffer);
         VKCHECK(vkEndCommandBuffer(command_buffer));
