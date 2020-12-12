@@ -4,8 +4,11 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include <math.h>
+#ifdef RED_OS_WINDOWS
+#include <spirv-headers/spirv.h>
+#else
 #include <spirv/1.2/spirv.h>
-#include <vulkan/vulkan_core.h>
+#endif
 
 typedef struct Application
 {
@@ -481,6 +484,12 @@ s32 main(s32 argc, char* argv[])
             used_instance_layers[instance_layer_count++] = instance_layers[i].layerName;
             validation_layer_found = true;
         }
+        if (strcmp("VK_LAYER_LUNARG_standard_validation", instance_layers[i].layerName) == 0)
+        {
+            print("Found validation layer. Adding to the instance layers\n");
+            used_instance_layers[instance_layer_count++] = instance_layers[i].layerName;
+            validation_layer_found = true;
+        }
     }
 
     // Extensions
@@ -493,40 +502,17 @@ s32 main(s32 argc, char* argv[])
     VKCHECK(vkEnumerateInstanceExtensionProperties(null, &instance_extension_count, null));
     VKCHECK(vkEnumerateInstanceExtensionProperties(null, &instance_extension_count, instance_extensions));
     print("Instance extension count = %u\n", instance_extension_count);
-    const char* platform_surface_name = VK_KHR_XCB_SURFACE_EXTENSION_NAME;
-
-    bool debug_utils_extension_found = false;
-    bool surface_extension_found = false;
-    bool platform_surface_extension_found = false;
-
-    for (u32 i = 0; i < instance_extension_count; i++)
+    u32 glfw_extension_count;
+    const char** extensions = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
+    if (extensions)
     {
-        if (strcmp(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, instance_extensions[i].extensionName) == 0)
+        for (u32 i = 0; i < glfw_extension_count; i++)
         {
-            print("Found debug utils extension! Adding it to the instance extensions\n");
-            debug_utils_extension_found = true;
-            used_instance_extensions[used_instance_extension_count++] = instance_extensions[i].extensionName;
-            continue;
-        }
-
-        if (strcmp(VK_KHR_SURFACE_EXTENSION_NAME, instance_extensions[i].extensionName) == 0)
-        {
-            print("Found surface extension! Adding it to the instance extensions\n");
-            surface_extension_found = true;
-            used_instance_extensions[used_instance_extension_count++] = instance_extensions[i].extensionName;
-            continue;
-        }
-
-        if (strcmp(platform_surface_name, instance_extensions[i].extensionName) == 0)
-        {
-            print("Found platform surface extension! Adding it to the instance extensions\n");
-            platform_surface_extension_found = true;
-            used_instance_extensions[used_instance_extension_count++] = instance_extensions[i].extensionName;
-            continue;
+            used_instance_extensions[used_instance_extension_count++] = extensions[i];
         }
     }
 
-    redassert(debug_utils_extension_found && surface_extension_found && platform_surface_extension_found);
+    used_instance_extensions[used_instance_extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 
     VkInstance instance = create_instance(pAllocator, app.title, app.title, VK_API_VERSION_1_2, app.version, app.version, used_instance_extensions, used_instance_extension_count, used_instance_layers, used_instance_layer_count);
     volkLoadInstanceOnly(instance);

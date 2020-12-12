@@ -338,7 +338,7 @@ s32 os_load_dynamic_library(const char* dyn_lib_name)
         exit(1);
     }
 
-    s32 id = dll_count++;
+    s32 id = shared_library_count++;
     loaded_dlls[id] = dll_instance;
     return id;
 #else
@@ -679,7 +679,7 @@ void os_debug_break(void)
 void os_get_callstack(const char* file, size_t line, const char* function)
 {
 #ifdef RED_OS_WINDOWS
-#error
+
 #elif defined(RED_OS_LINUX)
     // In Linux, we are dependent of the -rdynamic linker flag to show us more symbol information in the backtrace
     void* buffer[1024]; // 1024 functions should be deep enough in the callstack for general use case
