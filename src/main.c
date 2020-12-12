@@ -11,10 +11,21 @@
 #include <spirv/1.2/spirv.h>
 #endif
 
+static u32 selected_shader = 0;
+#define MAX_SHADER_COUNT (2)
+#define MAX_PIPELINE_COUNT (2)
+#define SHADER_STAGES_PER_PROGRAM (2)
 typedef struct Application
 {
+    struct
+    {
+        union
+        {
+            GLFWwindow* glfw;
+        } handle;
+        s32 width, height;
+    } window;
     char* title;
-    s32 width, height;
     u32 version;
 } Application;
 
@@ -292,165 +303,29 @@ static inline VkShaderStageFlagBits get_shader_stage(SpvExecutionModel execution
     }
 }
 
-typedef struct Shader
+typedef struct ShaderProgram
 {
-    VkDescriptorType resource_types[32];
-    u32 resource_mask;
-    u32 local_size_x;
-    u32 local_size_y;
-    u32 local_size_z;
-    bool uses_push_constants;
-} Shader;
+    const char* shaders[2];
+} ShaderProgram;
 
-static inline Shader parse_shader(const u32* code, u32 codeSize, VkShaderStageFlagBits* shader_stage)
+typedef struct ShaderProgramVK
 {
-    Shader shader = ZERO_INIT;
-	redassert(code[0] == SpvMagicNumber);
+    VkPipelineShaderStageCreateInfo shader_stages[2];
+} ShaderProgramVK;
 
-	u32 token_count = code[3];
-    print("Token count = %u\n", token_count);
-
-    SpirVToken tokens[1000];
-	const u32* insn = code + 5;
-
-    u32 first_iteration_count = 0;
-	while (insn != code + codeSize)
-	{
-        print("Condition iterator: %u. Target: %u\n", insn, code + codeSize);
-		u16 op_code = (u16)(insn[0]);
-		u16 wordCount = (u16)(insn[0] >> 16);
-
-		switch (op_code)
-		{
-		case SpvOpEntryPoint:
-		{
-			redassert(wordCount >= 2);
-			*shader_stage = get_shader_stage((SpvExecutionModel)(insn[1]));
-            return shader;
-		} break;
-		case SpvOpExecutionMode:
-		{
-			redassert(wordCount >= 3);
-			u32 mode = insn[2];
-
-			switch (mode)
-			{
-			case SpvExecutionModeLocalSize:
-				redassert(wordCount == 6);
-				shader.local_size_x = insn[3];
-				shader.local_size_y = insn[4];
-				shader.local_size_z = insn[5];
-				break;
-			}
-		} break;
-		case SpvOpDecorate:
-		{
-			redassert(wordCount >= 3);
-
-			u32 id = insn[1];
-			redassert(id < token_count);
-
-			switch (insn[2])
-			{
-			case SpvDecorationDescriptorSet:
-				redassert(wordCount == 4);
-				tokens[id].set = insn[3];
-				break;
-			case SpvDecorationBinding:
-				redassert(wordCount == 4);
-				tokens[id].binding = insn[3];
-				break;
-			}
-		} break;
-		case SpvOpTypeStruct:
-		case SpvOpTypeImage:
-		case SpvOpTypeSampler:
-		case SpvOpTypeSampledImage:
-		{
-			redassert(wordCount >= 2);
-
-			u32 id = insn[1];
-			redassert(id < token_count);
-
-			redassert(tokens[id].op_code == 0);
-			tokens[id].op_code = op_code;
-		} break;
-		case SpvOpTypePointer:
-		{
-			redassert(wordCount == 4);
-
-			u32 id = insn[1];
-			redassert(id < token_count);
-
-			redassert(tokens[id].op_code == 0);
-			tokens[id].op_code = op_code;
-			tokens[id].type_id = insn[3];
-			tokens[id].storage_class = insn[2];
-		} break;
-		case SpvOpVariable:
-		{
-			redassert(wordCount >= 4);
-
-			u32 id = insn[2];
-			redassert(id < token_count);
-
-			redassert(tokens[id].op_code == 0);
-			tokens[id].op_code = op_code;
-			tokens[id].type_id = insn[1];
-			tokens[id].storage_class = insn[3];
-		} break;
-		}
-
-		redassert(insn + wordCount <= code + codeSize);
-		insn += wordCount;
-        //print("First loop iteration count = %u\n", ++first_iteration_count);
-	}
-
-    for (u32 i = 0; i < token_count; i++)
+static void glfw_key_callback(GLFWwindow* window, s32 key, s32 scan_code, s32 action, s32 mods)
+{
+    if (action == GLFW_PRESS)
     {
-        SpirVToken token = tokens[i];
-		if (token.op_code == SpvOpVariable && (token.storage_class == SpvStorageClassUniform || token.storage_class == SpvStorageClassUniformConstant || token.storage_class == SpvStorageClassStorageBuffer))
-		{
-			redassert(token.set == 0);
-			redassert(token.binding < 32);
-			redassert(tokens[token.type_id].op_code == SpvOpTypePointer);
-
-			redassert((shader.resource_mask & (1 << token.binding)) == 0);
-
-			u32 typeKind = tokens[tokens[token.type_id].type_id].op_code;
-
-			switch (typeKind)
-			{
-			case SpvOpTypeStruct:
-				shader.resource_types[token.binding] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				shader.resource_mask |= 1 << token.binding;
-				break;
-			case SpvOpTypeImage:
-				shader.resource_types[token.binding] = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-				shader.resource_mask |= 1 << token.binding;
-				break;
-			case SpvOpTypeSampler:
-				shader.resource_types[token.binding] = VK_DESCRIPTOR_TYPE_SAMPLER;
-				shader.resource_mask |= 1 << token.binding;
-				break;
-			case SpvOpTypeSampledImage:
-				shader.resource_types[token.binding] = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				shader.resource_mask |= 1 << token.binding;
-				break;
-			default:
-				redassert(!"Unknown resource type");
-			}
-		}
-
-		if (token.op_code == SpvOpVariable && token.storage_class == SpvStorageClassPushConstant)
-		{
-			shader.uses_push_constants = true;
-		}
-	}
-
-    print("Ended parsing a shader\n");
-
-    return shader;
+        switch (key)
+        {
+            case GLFW_KEY_SPACE:
+                selected_shader = !selected_shader;
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 s32 main(s32 argc, char* argv[])
@@ -458,8 +333,8 @@ s32 main(s32 argc, char* argv[])
     Application app =
     {
         .title = "Hello world",
-        .width = 1024,
-        .height = 768, 
+        .window.width = 1024,
+        .window.height = 768, 
         .version = 1,
     };
     
@@ -467,8 +342,9 @@ s32 main(s32 argc, char* argv[])
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     volkInitialize();
     redassert(result == GLFW_TRUE);
-    GLFWwindow* window = glfwCreateWindow(app.width, app.height, app.title, NULL, NULL);
-    redassert(window);
+    app.window.handle.glfw = glfwCreateWindow(app.window.width, app.window.height, app.title, NULL, NULL);
+    redassert(app.window.handle.glfw);
+    glfwSetKeyCallback(app.window.handle.glfw, glfw_key_callback);
 
     VkAllocationCallbacks* pAllocator = NULL;
 
@@ -558,7 +434,7 @@ s32 main(s32 argc, char* argv[])
     redassert(swapchain_extension_found);
 
     VkSurfaceKHR surface;
-    VKCHECK(glfwCreateWindowSurface(instance, window, pAllocator, &surface));
+    VKCHECK(glfwCreateWindowSurface(instance, app.window.handle.glfw, pAllocator, &surface));
     redassert(surface);
 
     VkPhysicalDeviceFeatures device_features;
@@ -702,132 +578,141 @@ s32 main(s32 argc, char* argv[])
     VkRenderPass render_pass;
     VKCHECK(vkCreateRenderPass(device, &rp_create_info, pAllocator, &render_pass));
 
-    const char* shader_filenames[] =
+    ShaderProgram shader_programs[] =
     {
-        "trianglev.spv",
-        "trianglef.spv",
+        [0] =
+        {
+            .shaders[0] = "trianglev.spv",
+            .shaders[1] = "trianglef.spv",
+        },
+        [1] =
+        {
+            .shaders[0] = "triangle_color_v.spv",
+            .shaders[1] = "triangle_color_f.spv",
+        },
     };
-    VkShaderStageFlagBits hardcoded_shader_stages[array_length(shader_filenames)] =
+
+    VkShaderStageFlagBits hardcoded_shader_stages[] =
     {
         VK_SHADER_STAGE_VERTEX_BIT,
         VK_SHADER_STAGE_FRAGMENT_BIT,
     };
-    VkPipelineShaderStageCreateInfo shader_stages[array_length(shader_filenames)];
-    u32 shader_count = array_length(shader_filenames);
 
-    for (u32 i = 0; i < array_length(shader_filenames); i++)
+    VkPipelineShaderStageCreateInfo program_shaders[SHADER_STAGES_PER_PROGRAM];
+    u32 shader_program_stage_count = SHADER_STAGES_PER_PROGRAM;
+    ShaderProgramVK pipeline_shaders_create_info[MAX_SHADER_COUNT];
+    VkGraphicsPipelineCreateInfo graphics_pipelines_create_info[MAX_SHADER_COUNT] = ZERO_INIT;
+
+    for (u32 i = 0; i < array_length(shader_programs); i++)
     {
-        SB* file = os_file_load(shader_filenames[i]);
-        redassert(file);
-        u32 spirv_byte_count = file->len - 1;
-        redassert(spirv_byte_count % sizeof(u32) == 0);
+        ShaderProgram* shader_program = &shader_programs[i];
 
-        const u32* spirv_code_ptr = (const u32*)file->ptr;
-        // 
-        u32 spirv_code_size = spirv_byte_count;
-
-        VkShaderStageFlagBits shader_stage = hardcoded_shader_stages[i];
-        redassert(shader_stage);
-
-        VkShaderModuleCreateInfo ci = 
+        for (u32 shader_stage_index = 0; shader_stage_index < shader_program_stage_count; shader_stage_index++)
         {
-            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-            .pCode = spirv_code_ptr,
-            .codeSize = spirv_code_size,
+            SB* file = os_file_load(shader_program->shaders[shader_stage_index]);
+            redassert(file);
+            u32 spirv_byte_count = file->len - 1;
+            redassert(spirv_byte_count % sizeof(u32) == 0);
+
+            const u32* spirv_code_ptr = (const u32*)file->ptr;
+            u32 spirv_code_size = spirv_byte_count;
+
+            VkShaderStageFlagBits shader_stage = hardcoded_shader_stages[shader_stage_index];
+            redassert(shader_stage);
+
+            VkShaderModuleCreateInfo ci = 
+            {
+                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                .pCode = spirv_code_ptr,
+                .codeSize = spirv_code_size,
+            };
+
+            VkShaderModule shader_module;
+            VKCHECK(vkCreateShaderModule(device, &ci, pAllocator, &shader_module));
+
+            pipeline_shaders_create_info[i].shader_stages[shader_stage_index] = pipeline_shader_stage_create_info(shader_stage, shader_module);
+        }
+
+        VkPipelineVertexInputStateCreateInfo vertex_input_state_ci =
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         };
 
-        VkShaderModule shader_module;
-        VKCHECK(vkCreateShaderModule(device, &ci, pAllocator, &shader_module));
+        VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = pipeline_input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
-        shader_stages[i] = pipeline_shader_stage_create_info(shader_stage, shader_module);
+        VkPipelineRasterizationStateCreateInfo rasterization_state_ci = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
+
+        VkPipelineMultisampleStateCreateInfo multisample_state_ci =
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+            .minSampleShading = 1.0f,
+        };
+
+        VkPipelineColorBlendAttachmentState color_blend_attachment_state_ci =
+        {
+            .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+        };
+
+        VkPipelineLayoutCreateInfo pipeline_layout_ci =
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        };
+
+        VkPipelineColorBlendStateCreateInfo color_blend_state_ci =
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .logicOp = VK_LOGIC_OP_COPY,
+            .attachmentCount = 1,
+            .pAttachments = &color_blend_attachment_state_ci,
+        };
+
+        VkViewport viewport =
+        {
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = (f32) extent.width,
+            .height = (f32) extent.height,
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+
+        VkRect2D scissor =
+        {
+            .extent = extent,
+        };
+
+        VkPipelineViewportStateCreateInfo viewport_state_ci =
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .pViewports = &viewport,
+            .scissorCount = 1,
+            .pScissors = &scissor,
+        };
+
+        VkPipelineLayout pipeline_layout;
+        VKCHECK(vkCreatePipelineLayout(device, &pipeline_layout_ci, pAllocator, &pipeline_layout));
+
+        graphics_pipelines_create_info[i] = (VkGraphicsPipelineCreateInfo) 
+        {
+            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .stageCount = shader_program_stage_count,
+            .pStages = pipeline_shaders_create_info[i].shader_stages,
+            .pVertexInputState = &vertex_input_state_ci,
+            .pInputAssemblyState = &input_assembly_ci,
+            .pViewportState = &viewport_state_ci,
+            .pRasterizationState = &rasterization_state_ci,
+            .pMultisampleState = &multisample_state_ci, 
+            .pColorBlendState = &color_blend_state_ci,
+            .layout = pipeline_layout,
+            .renderPass = render_pass,
+            .subpass = 0,
+        };
     }
 
-    VkPipelineVertexInputStateCreateInfo vertex_input_state_ci =
-    {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    };
-
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = pipeline_input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-
-    VkPipelineRasterizationStateCreateInfo rasterization_state_ci = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
-
-    VkPipelineMultisampleStateCreateInfo multisample_state_ci =
-    {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-        .minSampleShading = 1.0f,
-    };
-
-    VkPipelineColorBlendAttachmentState color_blend_attachment_state_ci =
-    {
-        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-    };
-
-    VkPipelineLayoutCreateInfo pipeline_layout_ci =
-    {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-    };
-
-
-    VkPipelineColorBlendStateCreateInfo color_blend_state_ci =
-    {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .logicOp = VK_LOGIC_OP_COPY,
-        .attachmentCount = 1,
-        .pAttachments = &color_blend_attachment_state_ci,
-    };
-    print("Color blend\n");
-
-    VkViewport viewport =
-    {
-        .x = 0.0f,
-        .y = 0.0f,
-        .width = (f32) extent.width,
-        .height = (f32) extent.height,
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
-    };
-    print("Viewport\n");
-
-    VkRect2D scissor =
-    {
-        .extent = extent,
-    };
-    print("Scissor\n");
-
-    VkPipelineViewportStateCreateInfo viewport_state_ci =
-    {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-        .viewportCount = 1,
-        .pViewports = &viewport,
-        .scissorCount = 1,
-        .pScissors = &scissor,
-    };
-    print("Viewport state\n");
-
-    VkPipelineLayout pipeline_layout;
-    VKCHECK(vkCreatePipelineLayout(device, &pipeline_layout_ci, pAllocator, &pipeline_layout));
-
-    VkGraphicsPipelineCreateInfo graphics_pipeline_ci =
-    {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .stageCount = shader_count,
-        .pStages = shader_stages,
-        .pVertexInputState = &vertex_input_state_ci,
-        .pInputAssemblyState = &input_assembly_ci,
-        .pViewportState = &viewport_state_ci,
-        .pRasterizationState = &rasterization_state_ci,
-        .pMultisampleState = &multisample_state_ci, 
-        .pColorBlendState = &color_blend_state_ci,
-        .layout = pipeline_layout,
-        .renderPass = render_pass,
-        .subpass = 0,
-    };
-    
-    print("Reached before pipeline creation\n");
-    VkPipeline graphics_pipeline;
-    VKCHECK(vkCreateGraphicsPipelines(device, null, 1, &graphics_pipeline_ci, pAllocator, &graphics_pipeline));
-    print("Created graphics pipeline\n");
+    VkPipeline graphics_pipelines[MAX_PIPELINE_COUNT];
+    VKCHECK(vkCreateGraphicsPipelines(device, null, MAX_PIPELINE_COUNT, graphics_pipelines_create_info, pAllocator, graphics_pipelines));
 
 
     VkFramebufferCreateInfo fb_create_info =
@@ -869,7 +754,7 @@ s32 main(s32 argc, char* argv[])
 
     u32 frame_number = 0;
 
-    while (!glfwWindowShouldClose(window))
+    while (!glfwWindowShouldClose(app.window.handle.glfw))
     {
         glfwPollEvents();
 
@@ -906,7 +791,7 @@ s32 main(s32 argc, char* argv[])
         vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
         /***** BEGIN RENDER ******/
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipelines[selected_shader]);
         vkCmdDraw(command_buffer, 3, 1, 0, 0);
         /***** END RENDER ******/
 
