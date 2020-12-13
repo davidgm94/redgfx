@@ -15,7 +15,7 @@
 #include <spirv/1.2/spirv.h>
 #endif
 
-static u32 selected_shader = 0;
+static u32 space_selector = 0;
 
 typedef struct Vertex
 {
@@ -451,7 +451,7 @@ static void glfw_key_callback(GLFWwindow* window, s32 key, s32 scan_code, s32 ac
         switch (key)
         {
             case GLFW_KEY_SPACE:
-                selected_shader++;
+                space_selector++;
                 break;
             default:
                 break;
@@ -950,49 +950,54 @@ s32 main(s32 argc, char* argv[])
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &present_sem));
 
     Mesh monkey_mesh = mesh_load("../assets/monkey_flat.obj");
-    print("Monkey mesh loaded\n");
-
-    /* Mesh start */
-    Mesh mesh = ZERO_INIT;
-    vertices_append(&mesh.vertices,
+    Mesh triangle_mesh = ZERO_INIT;
+    vertices_append(&triangle_mesh.vertices,
             (Vertex)
             {
             .position = { 1.f, 1.f, 0, },
             .color = { 0.f, 1.f, 0, },
             });
-    vertices_append(&mesh.vertices,
+    vertices_append(&triangle_mesh.vertices,
             (Vertex)
             {
             .position = { -1.0f, 1.f, 0, },
             .color = { 0.f, 1.f, 0, },
             });
-    vertices_append(&mesh.vertices,
+    vertices_append(&triangle_mesh.vertices,
             (Vertex)
             {
             .position = { 0, -1.f, 0, },
             .color = { 0.f, 1.f, 0, },
             });
 
-    VkBufferCreateInfo buffer_ci =
+    Mesh meshes[] = { monkey_mesh, triangle_mesh };
+
+    for (u32 i = 0; i < array_length(meshes); i++)
     {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = mesh.vertices.len * sizeof(Vertex),
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-    };
+        Mesh* mesh = &meshes[i];
+        VkBufferCreateInfo buffer_ci =
+        {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = mesh->vertices.len * sizeof(Vertex),
+            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        };
 
-    VmaAllocationCreateInfo vma_ai =
-    {
-        .usage = VMA_MEMORY_USAGE_CPU_TO_GPU,
-    };
+        VmaAllocationCreateInfo vma_ai =
+        {
+            .usage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+        };
 
-    VKCHECK(vmaCreateBuffer(allocator, &buffer_ci, &vma_ai, &mesh.buffer.handle, &mesh.buffer.allocation, null));
+        VKCHECK(vmaCreateBuffer(allocator, &buffer_ci, &vma_ai, &mesh->buffer.handle, &mesh->buffer.allocation, null));
 
-    void* data;
-    VKCHECK(vmaMapMemory(allocator, mesh.buffer.allocation, &data));
+        void* data;
+        VKCHECK(vmaMapMemory(allocator, mesh->buffer.allocation, &data));
 
-    memcpy(data, vertices_ptr(&mesh.vertices), vertices_len(&mesh.vertices) * sizeof(Vertex));
+        memcpy(data, vertices_ptr(&mesh->vertices), vertices_len(&mesh->vertices) * sizeof(Vertex));
 
-    vmaUnmapMemory(allocator, mesh.buffer.allocation);
+        vmaUnmapMemory(allocator, mesh->buffer.allocation);
+    }
+
+    /* Mesh start */
 
     /* Mesh end */
 
@@ -1042,7 +1047,7 @@ s32 main(s32 argc, char* argv[])
 #else
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipelines[mesh_pipeline_index]);
         VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &mesh.buffer.handle, &offset);
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &meshes[space_selector % array_length(meshes)].buffer.handle, &offset);
 
         vec3f camera_pos = {0.f, 0.f, -2.f};
         mat4f view = translate(MAT4_IDENTITY_INIT, camera_pos);
@@ -1056,7 +1061,7 @@ s32 main(s32 argc, char* argv[])
         };
 
         vkCmdPushConstants(command_buffer, graphics_pipelines_create_info[mesh_pipeline_index].layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
-        vkCmdDraw(command_buffer, mesh.vertices.len, 1, 0, 0);
+        vkCmdDraw(command_buffer, meshes[space_selector % array_length(meshes)].vertices.len, 1, 0, 0);
 #endif
         /***** END RENDER ******/
 
