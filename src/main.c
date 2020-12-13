@@ -398,7 +398,7 @@ static Mesh mesh_load(const char* path)
     for (u32 i = 0; i < face_count; i++)
     {
         u32 face_vertices = obj->face_vertices[i];
-        for (u32 j = 0; j < face_vertices; i++)
+        for (u32 j = 0; j < face_vertices; j++)
         {
             fastObjIndex gi = obj->indices[index_offset + j];
 
@@ -409,7 +409,7 @@ static Mesh mesh_load(const char* path)
                 vertex_offset += 2;
             }
 
-            vb.ptr[vertex_offset] = (Vertex)
+            vb.ptr[vertex_offset++] = (Vertex)
             {
                 .position[0] = obj->positions[gi.p * 3 + 0],
                 .position[1] = obj->positions[gi.p * 3 + 1],
@@ -423,8 +423,6 @@ static Mesh mesh_load(const char* path)
                 .color[1] = obj->normals[gi.n * 3 + 1],
                 .color[2] = obj->normals[gi.n * 3 + 2],
             };
-
-            vertex_offset++;
         }
 
         index_offset += obj->face_vertices[i];
@@ -951,8 +949,8 @@ s32 main(s32 argc, char* argv[])
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &render_sem));
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &present_sem));
 
-    // Mesh monkey_mesh = mesh_load("../assets/monkey_flat.obj");
-    // print("Monkey mesh loaded\n");
+    Mesh monkey_mesh = mesh_load("../assets/monkey_flat.obj");
+    print("Monkey mesh loaded\n");
 
     /* Mesh start */
     Mesh mesh = ZERO_INIT;
