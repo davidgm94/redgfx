@@ -467,6 +467,12 @@ static inline Allocation* find_allocation_metadata(void* visible_address)
 {
     u8* it = (u8*)((uptr)visible_address - sizeof(Allocation));
     u32* alignment_ptr = (u32*)it;
+
+    if (*alignment_ptr != 16)
+    {
+        print("Probably uninitialized memory. Alignment is %u; should be 16\n", *alignment_ptr);
+    }
+
     redassert(*alignment_ptr == 16);
     redassert(it < (u8*)visible_address);
     return (Allocation*)it;

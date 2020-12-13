@@ -123,9 +123,16 @@ static inline void p_type_prefix##_ensure_capacity(t_type* buffer_name, u32 new_
         return;\
 \
     u32 better_capacity = buffer_name->cap;\
-    do {\
-        better_capacity = better_capacity * 5 / 2 + 8;\
-    } while (better_capacity < new_capacity);\
+    if (better_capacity == 0)\
+    {\
+        better_capacity = 16;\
+    }\
+    else\
+    {\
+        do {\
+            better_capacity = better_capacity * 5 / 2 + 8;\
+        } while (better_capacity < new_capacity);\
+    }\
 \
     buffer_name->ptr = RENEW(elem_type, buffer_name->ptr, better_capacity);\
     buffer_name->cap = better_capacity;\

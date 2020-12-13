@@ -12,7 +12,10 @@ find_program(
 )
 
 set(REDGFX_SOURCE
+    src/maths.h
     src/dependencies/volk.c
+    src/dependencies/vk_mem_alloc.cpp
+    src/dependencies/fast_obj.c
     src/main.c
     src/os.c
 )

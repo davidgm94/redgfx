@@ -1,6 +1,10 @@
 #include "types.h"
 #include "os.h"
+#include "maths.h"
 #include "dependencies/volk.h"
+#include "dependencies/vk_mem_alloc.h"
+#include "dependencies/fast_obj.h"
+#include <meshoptimizer.h>
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include <math.h>
@@ -12,9 +16,48 @@
 #endif
 
 static u32 selected_shader = 0;
-#define MAX_SHADER_COUNT (2)
-#define MAX_PIPELINE_COUNT (2)
-#define SHADER_STAGES_PER_PROGRAM (2)
+
+typedef struct Vertex
+{
+    f32 position[3];
+    f32 normal[3];
+    f32 color[3];
+} Vertex;
+
+GEN_BUFFER_STRUCT(VkVertexInputBindingDescription)
+GEN_BUFFER_STRUCT(VkVertexInputAttributeDescription)
+GEN_BUFFER_FUNCTIONS(vertex_binding, vb, VkVertexInputBindingDescriptionBuffer, VkVertexInputBindingDescription)
+GEN_BUFFER_FUNCTIONS(vertex_attribute, vab, VkVertexInputAttributeDescriptionBuffer, VkVertexInputAttributeDescription)
+
+typedef struct VertexInputDescription
+{
+    VkVertexInputBindingDescriptionBuffer bindings;
+    VkVertexInputAttributeDescriptionBuffer attributes;
+
+    VkPipelineVertexInputStateCreateFlags flags;
+} VertexInputDescription;
+
+GEN_BUFFER_STRUCT(Vertex)
+GEN_BUFFER_FUNCTIONS(vertices, vb, VertexBuffer, Vertex)
+
+typedef struct AllocatedBuffer
+{
+    VkBuffer handle;
+    VmaAllocation allocation;
+} AllocatedBuffer;
+
+typedef struct MeshPushConstants
+{
+    vec4f data;
+    mat4f render_matrix;
+} MeshPushConstants;
+
+typedef struct Mesh
+{
+    VertexBuffer vertices;
+    AllocatedBuffer buffer;
+} Mesh;
+
 typedef struct Application
 {
     struct
@@ -104,24 +147,28 @@ static inline const char* present_mode_string(VkPresentModeKHR present_mode)
 
 static inline VkInstance create_instance(VkAllocationCallbacks* pAllocator, const char* engine_name, const char* application_name, u32 api_version, u32 engine_version, u32 application_version, const char* const* extensions, u32 extension_count, const char* const* layers, u32 layer_count, VkDebugUtilsMessengerCreateInfoEXT* debug_utils)
 {
-    VkApplicationInfo application_info = ZERO_INIT;
-    application_info.apiVersion = api_version;
-    application_info.engineVersion = engine_version;
-    application_info.applicationVersion = application_version;
-    application_info.pApplicationName = application_name;
-    application_info.pEngineName = engine_name;
-    application_info.pNext = NULL;
-    application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    application_info.applicationVersion = 1;
+    VkApplicationInfo application_info =
+    {
+        .apiVersion = api_version,
+        .engineVersion = engine_version,
+        .applicationVersion = application_version,
+        .pApplicationName = application_name,
+        .pEngineName = engine_name,
+        .pNext = NULL,
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .applicationVersion = 1,
+    };
 
-    VkInstanceCreateInfo instance_ci = ZERO_INIT;
-    instance_ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    instance_ci.pNext = debug_utils;
-    instance_ci.pApplicationInfo = &application_info;
-    instance_ci.ppEnabledExtensionNames = extension_count > 0 ? extensions : NULL;
-    instance_ci.enabledExtensionCount = extension_count;
-    instance_ci.ppEnabledLayerNames = layer_count > 0 ? layers : NULL;
-    instance_ci.enabledLayerCount = layer_count;
+    VkInstanceCreateInfo instance_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext = debug_utils,
+        .pApplicationInfo = &application_info,
+        .ppEnabledExtensionNames = extension_count > 0 ? extensions : NULL,
+        .enabledExtensionCount = extension_count,
+        .ppEnabledLayerNames = layer_count > 0 ? layers : NULL,
+        .enabledLayerCount = layer_count,
+    };
 
     VkInstance instance;
     VKCHECK(vkCreateInstance(&instance_ci, pAllocator, &instance));
@@ -156,21 +203,23 @@ static inline VkDevice create_device(VkAllocationCallbacks* pAllocator, VkPhysic
     for (u32 i = 0; i < queue_family_count; i++)
     {
         u32 queue_family_index = queue_family_indices[i];
-        queue_create_infos[i].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queue_create_infos[i].queueFamilyIndex = queue_family_index;
-        queue_create_infos[i].queueCount = 1;
-        queue_create_infos[i].pQueuePriorities = queue_priorities;
+        queue_create_infos[i] = (VkDeviceQueueCreateInfo)
+        {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = queue_family_index,
+            .queueCount = 1,
+            .pQueuePriorities = queue_priorities,
+        };
     }
 
-    VkDeviceCreateInfo device_ci = ZERO_INIT;
-    device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    device_ci.ppEnabledExtensionNames = device_extension_count > 0 ? device_extensions : NULL;
-    device_ci.enabledExtensionCount = device_extension_count;
-    device_ci.pQueueCreateInfos = queue_create_infos;
-    device_ci.queueCreateInfoCount = queue_family_count;
-    //device_ci.enabledLayerCount = 1;
-    //char validation_layer[] = "VK_LAYER_KHRONOS_validation";
-    //device_ci.ppEnabledLayerNames = (const char* const*)&validation_layer;
+    VkDeviceCreateInfo device_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .ppEnabledExtensionNames = device_extension_count > 0 ? device_extensions : NULL,
+        .enabledExtensionCount = device_extension_count,
+        .pQueueCreateInfos = queue_create_infos,
+        .queueCreateInfoCount = queue_family_count,
+    };
 
     VkDevice device;
     VKCHECK(vkCreateDevice(pd, &device_ci, pAllocator, &device));
@@ -201,22 +250,24 @@ static inline VkSwapchainKHR create_swapchain(VkAllocationCallbacks* pAllocator,
 		: VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
 
 
-    VkSwapchainCreateInfoKHR swapchain_ci = ZERO_INIT;
-    swapchain_ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    swapchain_ci.surface = surface;
-    swapchain_ci.minImageCount = MAX(2, surface_capabilities.minImageCount);
-    swapchain_ci.imageFormat = format.format;
-    swapchain_ci.imageColorSpace = format.colorSpace;
-    swapchain_ci.imageExtent = extent;
-    swapchain_ci.imageArrayLayers = 1;
-    swapchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    swapchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    swapchain_ci.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    swapchain_ci.compositeAlpha = surface_composite;
-    swapchain_ci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    swapchain_ci.clipped = VK_TRUE;
-    swapchain_ci.pQueueFamilyIndices = &queue_family_index;
-    swapchain_ci.queueFamilyIndexCount = 1;
+    VkSwapchainCreateInfoKHR swapchain_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .surface = surface,
+        .minImageCount = MAX(2, surface_capabilities.minImageCount),
+        .imageFormat = format.format,
+        .imageColorSpace = format.colorSpace,
+        .imageExtent = extent,
+        .imageArrayLayers = 1,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+        .compositeAlpha = surface_composite,
+        .presentMode = VK_PRESENT_MODE_FIFO_KHR,
+        .clipped = VK_TRUE,
+        .pQueueFamilyIndices = &queue_family_index,
+        .queueFamilyIndexCount = 1,
+    };
 
     VkSwapchainKHR swapchain;
     VKCHECK(vkCreateSwapchainKHR(device, &swapchain_ci, pAllocator, &swapchain));
@@ -272,31 +323,128 @@ typedef struct SpirVToken
     u32 set;
 } SpirVToken;
 
-static inline VkShaderStageFlagBits get_shader_stage(SpvExecutionModel execution_model)
-{
-    switch (execution_model)
-    {
-        case SpvExecutionModelVertex:
-            return VK_SHADER_STAGE_VERTEX_BIT;
-        case SpvExecutionModelFragment:
-            return VK_SHADER_STAGE_FRAGMENT_BIT;
-        case SpvExecutionModelGLCompute:
-            return VK_SHADER_STAGE_COMPUTE_BIT;
-        default:
-            RED_UNREACHABLE;
-            return 0;
-    }
-}
-
 typedef struct ShaderProgram
 {
     const char* shaders[2];
+    bool vertex_buffer;
 } ShaderProgram;
 
 typedef struct ShaderProgramVK
 {
     VkPipelineShaderStageCreateInfo shader_stages[2];
 } ShaderProgramVK;
+
+VertexInputDescription Vertex_get_description(void)
+{
+    VertexInputDescription description = ZERO_INIT;
+
+    VkVertexInputBindingDescription main_binding =
+    {
+        .binding = 0,
+        .stride = sizeof(Vertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    };
+
+    vertex_binding_append(&description.bindings, main_binding);
+
+    VkVertexInputAttributeDescription position_attribute =
+    {
+        .binding = 0,
+        .location = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, position),
+    };
+    VkVertexInputAttributeDescription normal_attribute =
+    {
+        .binding = 0,
+        .location = 1,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, normal),
+    };
+    VkVertexInputAttributeDescription color_attribute =
+    {
+        .binding = 0,
+        .location = 2,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, color),
+    };
+
+    vertex_attribute_append(&description.attributes, position_attribute);
+    vertex_attribute_append(&description.attributes, normal_attribute);
+    vertex_attribute_append(&description.attributes, color_attribute);
+
+    return description;
+}
+
+static Mesh mesh_load(const char* path)
+{
+    fastObjMesh* obj = fast_obj_read(path);
+    redassert(obj);
+    u64 index_count = 0;
+    u32 face_count = obj->face_count;
+    
+    for (u32 i = 0; i < face_count; i++)
+    {
+        index_count += 3 * (obj->face_vertices[i] - 2);
+    }
+
+    VertexBuffer vb = ZERO_INIT;
+    vertices_resize(&vb, index_count);
+    vb.len = index_count;
+
+    u64 vertex_offset = 0;
+    u64 index_offset = 0;
+
+    for (u32 i = 0; i < face_count; i++)
+    {
+        u32 face_vertices = obj->face_vertices[i];
+        for (u32 j = 0; j < face_vertices; i++)
+        {
+            fastObjIndex gi = obj->indices[index_offset + j];
+
+            if (j >= 3)
+            {
+                vb.ptr[vertex_offset + 0] = vb.ptr[vertex_offset - 3];
+                vb.ptr[vertex_offset + 1] = vb.ptr[vertex_offset - 1];
+                vertex_offset += 2;
+            }
+
+            vb.ptr[vertex_offset] = (Vertex)
+            {
+                .position[0] = obj->positions[gi.p * 3 + 0],
+                .position[1] = obj->positions[gi.p * 3 + 1],
+                .position[2] = obj->positions[gi.p * 3 + 2],
+
+                .normal[0] = obj->normals[gi.n * 3 + 0],
+                .normal[1] = obj->normals[gi.n * 3 + 1],
+                .normal[2] = obj->normals[gi.n * 3 + 2],
+
+                .color[0] = obj->normals[gi.n * 3 + 0],
+                .color[1] = obj->normals[gi.n * 3 + 1],
+                .color[2] = obj->normals[gi.n * 3 + 2],
+            };
+
+            vertex_offset++;
+        }
+
+        index_offset += obj->face_vertices[i];
+    }
+
+    redassert(vertex_offset == index_count);
+    fast_obj_destroy(obj);
+
+    Mesh mesh = ZERO_INIT;
+    /*u32* remap = NEW(u32, index_count);*/
+    /*u64 vertex_count = meshopt_generateVertexRemap(remap, NULL, index_count, vb.ptr, index_count, sizeof(Vertex));*/
+
+    /*vertices_resize(&mesh.vertices, vertex_count);*/
+    /*mesh.vertices.len = vertex_count;*/
+
+    /*meshopt_remapVertexBuffer(mesh.vertices.ptr, vb.ptr, , size_t vertex_size, const unsigned int *remap)*/
+    /*meshopt_remapIndexBuffer(m.indices, NULL, indexCount, remap);*/
+    mesh.vertices = vb;
+    return mesh;
+}
 
 static void glfw_key_callback(GLFWwindow* window, s32 key, s32 scan_code, s32 action, s32 mods)
 {
@@ -305,7 +453,7 @@ static void glfw_key_callback(GLFWwindow* window, s32 key, s32 scan_code, s32 ac
         switch (key)
         {
             case GLFW_KEY_SPACE:
-                selected_shader = !selected_shader;
+                selected_shader++;
                 break;
             default:
                 break;
@@ -378,11 +526,13 @@ s32 main(s32 argc, char* argv[])
 
     used_instance_extensions[used_instance_extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 
-    VkDebugUtilsMessengerCreateInfoEXT debug_ci = ZERO_INIT;
-    debug_ci.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    debug_ci.pfnUserCallback = VK_debug_callback;
-    debug_ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT; //| VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
-    debug_ci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+    VkDebugUtilsMessengerCreateInfoEXT debug_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        .pfnUserCallback = VK_debug_callback,
+        .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, //| VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT,
+        .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
+    };
 
     VkInstance instance = create_instance(pAllocator, app.title, app.title, VK_API_VERSION_1_2, app.version, app.version, used_instance_extensions, used_instance_extension_count, used_instance_layers, used_instance_layer_count, &debug_ci);
     volkLoadInstanceOnly(instance);
@@ -449,6 +599,42 @@ s32 main(s32 argc, char* argv[])
 
     VkDevice device = create_device(pAllocator, pd, used_device_extensions, used_device_extension_count, &queue_family_index, 1);
     volkLoadDevice(device);
+    VmaVulkanFunctions vma_f =
+    {
+        .vkGetPhysicalDeviceProperties=          vkGetPhysicalDeviceProperties,
+        .vkGetPhysicalDeviceMemoryProperties=    vkGetPhysicalDeviceMemoryProperties,
+        .vkAllocateMemory=                       vkAllocateMemory,
+        .vkFreeMemory=                           vkFreeMemory,
+        .vkMapMemory=                            vkMapMemory,
+        .vkUnmapMemory=                          vkUnmapMemory,
+        .vkFlushMappedMemoryRanges=              vkFlushMappedMemoryRanges,
+        .vkInvalidateMappedMemoryRanges=         vkInvalidateMappedMemoryRanges,
+        .vkBindBufferMemory=                     vkBindBufferMemory,
+        .vkBindImageMemory=                      vkBindImageMemory,
+        .vkGetBufferMemoryRequirements=          vkGetBufferMemoryRequirements,
+        .vkGetImageMemoryRequirements=           vkGetImageMemoryRequirements,
+        .vkCreateBuffer=                         vkCreateBuffer,
+        .vkDestroyBuffer=                        vkDestroyBuffer,
+        .vkCreateImage=                          vkCreateImage,
+        .vkDestroyImage=                         vkDestroyImage,
+        .vkCmdCopyBuffer=                        vkCmdCopyBuffer,
+        .vkGetBufferMemoryRequirements2KHR=      vkGetBufferMemoryRequirements2KHR,
+        .vkGetImageMemoryRequirements2KHR=       vkGetImageMemoryRequirements2KHR,
+        .vkBindBufferMemory2KHR=                 vkBindBufferMemory2KHR,
+        .vkBindImageMemory2KHR=                  vkBindImageMemory2KHR,
+        .vkGetPhysicalDeviceMemoryProperties2KHR=vkGetPhysicalDeviceMemoryProperties2KHR,
+    };
+    
+    VmaAllocatorCreateInfo allocator_ci =
+    {
+        .physicalDevice = pd,
+        .device = device,
+        .instance = instance,
+        .pVulkanFunctions = &vma_f,
+    };
+
+    VmaAllocator allocator;
+    VKCHECK(vmaCreateAllocator(&allocator_ci, &allocator));
 
     VkSurfaceFormatKHR surface_formats[100];
     u32 surface_format_count;
@@ -482,20 +668,22 @@ s32 main(s32 argc, char* argv[])
 
     for (u32 i = 0; i < swapchain_image_count; i++)
     {
-        VkImageViewCreateInfo create_info = ZERO_INIT;
-        create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        create_info.image = swapchain_images[i];
-        create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        create_info.components.r = VK_COMPONENT_SWIZZLE_R;
-        create_info.components.g = VK_COMPONENT_SWIZZLE_G;
-        create_info.components.b = VK_COMPONENT_SWIZZLE_B;
-        create_info.components.a = VK_COMPONENT_SWIZZLE_A;
-        create_info.format = surface_format.format;
-        create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        create_info.subresourceRange.baseArrayLayer = 0;
-        create_info.subresourceRange.baseMipLevel = 0;
-        create_info.subresourceRange.layerCount = 1;
-        create_info.subresourceRange.levelCount = 1;
+        VkImageViewCreateInfo create_info =
+        {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = swapchain_images[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .components.r = VK_COMPONENT_SWIZZLE_R,
+            .components.g = VK_COMPONENT_SWIZZLE_G,
+            .components.b = VK_COMPONENT_SWIZZLE_B,
+            .components.a = VK_COMPONENT_SWIZZLE_A,
+            .format = surface_format.format,
+            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .subresourceRange.baseArrayLayer = 0,
+            .subresourceRange.baseMipLevel = 0,
+            .subresourceRange.layerCount = 1,
+            .subresourceRange.levelCount = 1,
+        };
         
         VKCHECK(vkCreateImageView(device, &create_info, pAllocator, &swapchain_image_views[i]));
         redassert(swapchain_image_views[i]);
@@ -564,17 +752,25 @@ s32 main(s32 argc, char* argv[])
     VkRenderPass render_pass;
     VKCHECK(vkCreateRenderPass(device, &rp_create_info, pAllocator, &render_pass));
 
+#define MESH_PIPELINE_INDEX 0
+    const u32 mesh_pipeline_index = MESH_PIPELINE_INDEX;
     ShaderProgram shader_programs[] =
     {
-        [0] =
+        /*[0] =*/
+        /*{*/
+            /*.shaders[0] = "trianglev.spv",*/
+            /*.shaders[1] = "trianglef.spv",*/
+        /*},*/
+        /*[1] =*/
+        /*{*/
+            /*.shaders[0] = "triangle_color_v.spv",*/
+            /*.shaders[1] = "triangle_color_f.spv",*/
+        /*},*/
+        [MESH_PIPELINE_INDEX] =
         {
-            .shaders[0] = "trianglev.spv",
-            .shaders[1] = "trianglef.spv",
-        },
-        [1] =
-        {
-            .shaders[0] = "triangle_color_v.spv",
-            .shaders[1] = "triangle_color_f.spv",
+            .shaders[0] = "triangle_meshv.spv",
+            .shaders[1] = "triangle_meshf.spv",
+            .vertex_buffer = true,
         },
     };
 
@@ -584,12 +780,13 @@ s32 main(s32 argc, char* argv[])
         VK_SHADER_STAGE_FRAGMENT_BIT,
     };
 
-    VkPipelineShaderStageCreateInfo program_shaders[SHADER_STAGES_PER_PROGRAM];
-    u32 shader_program_stage_count = SHADER_STAGES_PER_PROGRAM;
-    ShaderProgramVK pipeline_shaders_create_info[MAX_SHADER_COUNT];
-    VkGraphicsPipelineCreateInfo graphics_pipelines_create_info[MAX_SHADER_COUNT] = ZERO_INIT;
+    u32 pipeline_count = array_length(shader_programs);
+    u32 shader_program_stage_count = array_length(hardcoded_shader_stages);
+    VkPipelineShaderStageCreateInfo program_shaders[array_length(hardcoded_shader_stages)];
+    ShaderProgramVK pipeline_shaders_create_info[array_length(shader_programs)];
+    VkGraphicsPipelineCreateInfo graphics_pipelines_create_info[array_length(shader_programs)] = ZERO_INIT;
 
-    for (u32 i = 0; i < array_length(shader_programs); i++)
+    for (u32 i = 0; i < pipeline_count; i++)
     {
         ShaderProgram* shader_program = &shader_programs[i];
 
@@ -624,6 +821,15 @@ s32 main(s32 argc, char* argv[])
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         };
 
+        if (shader_program->vertex_buffer)
+        {
+            VertexInputDescription desc = Vertex_get_description();
+            vertex_input_state_ci.pVertexAttributeDescriptions = desc.attributes.ptr;
+            vertex_input_state_ci.vertexAttributeDescriptionCount = desc.attributes.len;
+            vertex_input_state_ci.pVertexBindingDescriptions = desc.bindings.ptr;
+            vertex_input_state_ci.vertexBindingDescriptionCount = desc.bindings.len;
+        }
+
         VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = pipeline_input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
         VkPipelineRasterizationStateCreateInfo rasterization_state_ci = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
@@ -638,11 +844,6 @@ s32 main(s32 argc, char* argv[])
         VkPipelineColorBlendAttachmentState color_blend_attachment_state_ci =
         {
             .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-        };
-
-        VkPipelineLayoutCreateInfo pipeline_layout_ci =
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         };
 
         VkPipelineColorBlendStateCreateInfo color_blend_state_ci =
@@ -677,6 +878,20 @@ s32 main(s32 argc, char* argv[])
             .pScissors = &scissor,
         };
 
+        VkPushConstantRange push_constant =
+        {
+            .offset = 0,
+            .size = sizeof(MeshPushConstants),
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        };
+
+        VkPipelineLayoutCreateInfo pipeline_layout_ci =
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .pPushConstantRanges = &push_constant,
+            .pushConstantRangeCount = 1,
+        };
+
         VkPipelineLayout pipeline_layout;
         VKCHECK(vkCreatePipelineLayout(device, &pipeline_layout_ci, pAllocator, &pipeline_layout));
 
@@ -697,9 +912,8 @@ s32 main(s32 argc, char* argv[])
         };
     }
 
-    VkPipeline graphics_pipelines[MAX_PIPELINE_COUNT];
-    VKCHECK(vkCreateGraphicsPipelines(device, null, MAX_PIPELINE_COUNT, graphics_pipelines_create_info, pAllocator, graphics_pipelines));
-
+    VkPipeline graphics_pipelines[array_length(shader_programs)];
+    VKCHECK(vkCreateGraphicsPipelines(device, null, pipeline_count, graphics_pipelines_create_info, pAllocator, graphics_pipelines));
 
     VkFramebufferCreateInfo fb_create_info =
     {
@@ -737,12 +951,57 @@ s32 main(s32 argc, char* argv[])
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &render_sem));
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &present_sem));
 
+    // Mesh monkey_mesh = mesh_load("../assets/monkey_flat.obj");
+    // print("Monkey mesh loaded\n");
+
+    /* Mesh start */
+    Mesh mesh = ZERO_INIT;
+    vertices_append(&mesh.vertices,
+            (Vertex)
+            {
+            .position = { 1.f, 1.f, 0, },
+            .color = { 0.f, 1.f, 0, },
+            });
+    vertices_append(&mesh.vertices,
+            (Vertex)
+            {
+            .position = { -1.0f, 1.f, 0, },
+            .color = { 0.f, 1.f, 0, },
+            });
+    vertices_append(&mesh.vertices,
+            (Vertex)
+            {
+            .position = { 0, -1.f, 0, },
+            .color = { 0.f, 1.f, 0, },
+            });
+
+    VkBufferCreateInfo buffer_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = mesh.vertices.len * sizeof(Vertex),
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    };
+
+    VmaAllocationCreateInfo vma_ai =
+    {
+        .usage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+    };
+
+    VKCHECK(vmaCreateBuffer(allocator, &buffer_ci, &vma_ai, &mesh.buffer.handle, &mesh.buffer.allocation, null));
+
+    void* data;
+    VKCHECK(vmaMapMemory(allocator, mesh.buffer.allocation, &data));
+
+    memcpy(data, vertices_ptr(&mesh.vertices), vertices_len(&mesh.vertices) * sizeof(Vertex));
+
+    vmaUnmapMemory(allocator, mesh.buffer.allocation);
+
+    /* Mesh end */
 
     u32 frame_number = 0;
 
     while (!glfwWindowShouldClose(app.window.handle.glfw))
     {
-        
         glfwPollEvents();
         print("************ NEW FRAME START ************\n");
 
@@ -779,8 +1038,28 @@ s32 main(s32 argc, char* argv[])
         vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
         /***** BEGIN RENDER ******/
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipelines[selected_shader]);
+#if 0
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipelines[selected_shader % MAX_SHADER_COUNT]);
         vkCmdDraw(command_buffer, 3, 1, 0, 0);
+#else
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipelines[mesh_pipeline_index]);
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &mesh.buffer.handle, &offset);
+
+        vec3f camera_pos = {0.f, 0.f, -2.f};
+        mat4f view = translate(MAT4_IDENTITY_INIT, camera_pos);
+        mat4f proj = perspective(rad(70.f), 1700.f / 900.f, 0.1f, 200.f);
+        proj.row[1].v[1] *= -1;
+        mat4f model = rotate(MAT4_IDENTITY_INIT, rad(frame_number * 0.4f), (vec3f) {0,1,0});
+
+        MeshPushConstants constants =
+        {
+            .render_matrix = mat4f_mul(mat4f_mul(proj, view), model),
+        };
+
+        vkCmdPushConstants(command_buffer, graphics_pipelines_create_info[mesh_pipeline_index].layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+        vkCmdDraw(command_buffer, mesh.vertices.len, 1, 0, 0);
+#endif
         /***** END RENDER ******/
 
         vkCmdEndRenderPass(command_buffer);
@@ -824,7 +1103,7 @@ s32 main(s32 argc, char* argv[])
     vkDestroySemaphore(device, present_sem, pAllocator);
     vkFreeCommandBuffers(device, command_pool, 1, &command_buffer);
     vkDestroyCommandPool(device, command_pool, pAllocator);
-    for (u32 i = 0; i < MAX_PIPELINE_COUNT; i++)
+    for (u32 i = 0; i < pipeline_count; i++)
     {
         u32 stage_count = graphics_pipelines_create_info[i].stageCount;
         for (u32 stage = 0; stage < stage_count; stage++)
@@ -848,4 +1127,6 @@ s32 main(s32 argc, char* argv[])
     vkDestroyDevice(device, pAllocator);
     vkDestroyDebugUtilsMessengerEXT(instance, messenger, pAllocator);
     vkDestroyInstance(instance, pAllocator);
+
+    glfwDestroyWindow(app.window.handle.glfw);
 }

@@ -1,3 +1,3 @@
 pushd out
-make
+make |& head -30
 popd
