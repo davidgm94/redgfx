@@ -46,6 +46,12 @@ typedef struct AllocatedBuffer
     VmaAllocation allocation;
 } AllocatedBuffer;
 
+typedef struct AllocatedImage
+{
+    VkImage handle;
+    VmaAllocation allocation;
+} AllocatedImage;
+
 typedef struct MeshPushConstants
 {
     vec4f data;
@@ -376,6 +382,60 @@ VertexInputDescription Vertex_get_description(void)
     return description;
 }
 
+static inline VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlagBits usage_flags, VkExtent3D extent)
+{
+    VkImageCreateInfo image_create_info =
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = extent,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = usage_flags,
+    };
+
+    return image_create_info;
+}
+
+static inline VkImageViewCreateInfo image_view_create_info(VkFormat format, VkImage image, VkImageAspectFlags aspect_flags)
+{
+    VkImageViewCreateInfo image_view_create_info =
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .image = image,
+        .format = format,
+        .subresourceRange =
+        {
+            .levelCount = 1,
+            .layerCount = 1,
+            .aspectMask = aspect_flags,
+        },
+    };
+
+    return image_view_create_info;
+}
+
+static inline VkPipelineDepthStencilStateCreateInfo depth_stencil_create_info(bool depth_test, bool depth_write, VkCompareOp compare_op)
+{
+    VkPipelineDepthStencilStateCreateInfo depth_stencil_state_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = depth_test,
+        .depthWriteEnable = depth_write,
+        .depthCompareOp = depth_test ? compare_op : VK_COMPARE_OP_ALWAYS,
+        .depthBoundsTestEnable = false,
+        .minDepthBounds = 0.0f,
+        .maxDepthBounds = 1.0f,
+        .stencilTestEnable = false,
+    };
+
+    return depth_stencil_state_ci;
+}
+
 static Mesh mesh_load(const char* path)
 {
     fastObjMesh* obj = fast_obj_read(path);
@@ -687,6 +747,30 @@ s32 main(s32 argc, char* argv[])
         redassert(swapchain_image_views[i]);
     }
 
+    VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
+    VkExtent3D depth_extent = 
+    {
+        .width = extent.width,
+        .height = extent.height,
+        .depth = 1,
+    };
+
+    VkImageCreateInfo depth_image_ci = image_create_info(depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depth_extent);
+
+    VmaAllocationCreateInfo depth_image_ai =
+    {
+        .usage = VMA_MEMORY_USAGE_GPU_ONLY,
+        .requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    };
+
+    AllocatedImage depth_image = ZERO_INIT;
+
+    VKCHECK(vmaCreateImage(allocator, &depth_image_ci, &depth_image_ai, &depth_image.handle, &depth_image.allocation, null));
+
+    VkImageViewCreateInfo depth_image_view_ci = image_view_create_info(depth_format, depth_image.handle, VK_IMAGE_ASPECT_DEPTH_BIT);
+    VkImageView depth_image_view;
+    VKCHECK(vkCreateImageView(device, &depth_image_view_ci, pAllocator, &depth_image_view));
+
     VkQueue queue;
     u32 queue_index = 0;
     vkGetDeviceQueue(device, queue_family_index, queue_index, &queue);
@@ -731,18 +815,39 @@ s32 main(s32 argc, char* argv[])
         .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     };
 
+    VkAttachmentDescription depth_attachment = 
+    {
+        .format = depth_format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
+    VkAttachmentReference depth_attachment_ref =
+    {
+        .attachment = 1,
+        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    };
+
     VkSubpassDescription subpass_desc =
     {
         .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color_attachment_ref,
+        .pDepthStencilAttachment = &depth_attachment_ref,
     };
+
+    VkAttachmentDescription attachments[] = { color_attachment, depth_attachment };
 
     VkRenderPassCreateInfo rp_create_info =
     {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .pAttachments = &color_attachment,
-        .attachmentCount = 1,
+        .pAttachments = attachments,
+        .attachmentCount = array_length(attachments),
         .pSubpasses = &subpass_desc,
         .subpassCount = 1,
     };
@@ -852,6 +957,8 @@ s32 main(s32 argc, char* argv[])
             .pAttachments = &color_blend_attachment_state_ci,
         };
 
+        VkPipelineDepthStencilStateCreateInfo depth_stencil_state_ci = depth_stencil_create_info(true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+
         VkViewport viewport =
         {
             .x = 0.0f,
@@ -904,6 +1011,7 @@ s32 main(s32 argc, char* argv[])
             .pRasterizationState = &rasterization_state_ci,
             .pMultisampleState = &multisample_state_ci, 
             .pColorBlendState = &color_blend_state_ci,
+            .pDepthStencilState = &depth_stencil_state_ci,
             .layout = pipeline_layout,
             .renderPass = render_pass,
             .subpass = 0,
@@ -927,7 +1035,9 @@ s32 main(s32 argc, char* argv[])
 
     for (u32 i = 0; i < swapchain_image_count; i++)
     {
-        fb_create_info.pAttachments = &swapchain_image_views[i];
+        VkImageView attachments[] = { swapchain_image_views[i], depth_image_view };
+        fb_create_info.pAttachments = attachments;
+        fb_create_info.attachmentCount = array_length(attachments);
         VKCHECK(vkCreateFramebuffer(device, &fb_create_info, pAllocator, &framebuffers[i]));
     }
 
@@ -997,10 +1107,6 @@ s32 main(s32 argc, char* argv[])
         vmaUnmapMemory(allocator, mesh->buffer.allocation);
     }
 
-    /* Mesh start */
-
-    /* Mesh end */
-
     u32 frame_number = 0;
 
     while (!glfwWindowShouldClose(app.window.handle.glfw))
@@ -1024,9 +1130,16 @@ s32 main(s32 argc, char* argv[])
 
         VKCHECK(vkBeginCommandBuffer(command_buffer, &begin_info));
 
-        VkClearValue clear_value = ZERO_INIT;
+        VkClearValue color_clear = ZERO_INIT;
         f32 flash = (f32)fabs(sin(frame_number / 120.f));
-        clear_value.color = (VkClearColorValue) { { 0.0f, 0.0f, flash, 1.0f} };
+        color_clear.color = (VkClearColorValue) { { 0.0f, 0.0f, flash, 1.0f} };
+
+        VkClearValue depth_clear =
+        {
+            .depthStencil.depth = 1.f,
+        };
+
+        VkClearValue clear_values[] = { color_clear, depth_clear };
 
         VkRenderPassBeginInfo rp_begin_info =
         {
@@ -1034,8 +1147,8 @@ s32 main(s32 argc, char* argv[])
             .renderPass = render_pass,
             .renderArea.extent = extent,
             .framebuffer = framebuffers[swapchain_image_index],
-            .pClearValues = &clear_value,
-            .clearValueCount = 1,
+            .pClearValues = clear_values,
+            .clearValueCount = array_length(clear_values),
         };
 
         vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
