@@ -64,6 +64,17 @@ typedef struct Mesh
     AllocatedBuffer buffer;
 } Mesh;
 
+typedef struct Material
+{
+    VkPipeline pipeline;
+    VkPipelineLayout layout;
+} Material;
+
+typedef struct Renderable
+{
+
+} Renderable;
+
 typedef struct Application
 {
     struct
@@ -129,8 +140,8 @@ static inline const char* VKResultToString(VkResult result)
         // CASE_TO_STR(VK_ERROR_PIPELINE_COMPILE_REQUIRED_EXT);
         CASE_TO_STR(VK_RESULT_MAX_ENUM);
         default:
-            RED_NOT_IMPLEMENTED;
-            return null;
+        RED_NOT_IMPLEMENTED;
+        return null;
     }
 }
 
@@ -146,8 +157,8 @@ static inline const char* present_mode_string(VkPresentModeKHR present_mode)
         CASE_TO_STR(VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR);
         CASE_TO_STR(VK_PRESENT_MODE_MAX_ENUM_KHR);
         default:
-            RED_NOT_IMPLEMENTED;
-            return null;
+        RED_NOT_IMPLEMENTED;
+        return null;
     }
 }
 
@@ -212,9 +223,9 @@ static inline VkDevice create_device(VkAllocationCallbacks* pAllocator, VkPhysic
         queue_create_infos[i] = (VkDeviceQueueCreateInfo)
         {
             .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = queue_family_index,
-            .queueCount = 1,
-            .pQueuePriorities = queue_priorities,
+                .queueFamilyIndex = queue_family_index,
+                .queueCount = 1,
+                .pQueuePriorities = queue_priorities,
         };
     }
 
@@ -248,12 +259,12 @@ static inline VkSurfaceFormatKHR get_swapchain_format(VkSurfaceFormatKHR* surfac
 static inline VkSwapchainKHR create_swapchain(VkAllocationCallbacks* pAllocator, VkDevice device, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR surface_capabilities, VkSurfaceFormatKHR format, VkExtent2D extent, u32 queue_family_index)
 {
     VkCompositeAlphaFlagBitsKHR surface_composite = (surface_capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
-		? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-		: (surface_capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
-		? VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR
-		: (surface_capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)
-		? VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR
-		: VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+        ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+        : (surface_capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
+        ? VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR
+        : (surface_capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)
+        ? VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR
+        : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
 
 
     VkSwapchainCreateInfoKHR swapchain_ci =
@@ -442,7 +453,7 @@ static Mesh mesh_load(const char* path)
     redassert(obj);
     u64 index_count = 0;
     u32 face_count = obj->face_count;
-    
+
     for (u32 i = 0; i < face_count; i++)
     {
         index_count += 3 * (obj->face_vertices[i] - 2);
@@ -528,7 +539,7 @@ s32 main(s32 argc, char* argv[])
         .window.height = 768, 
         .version = 1,
     };
-    
+
     s32 result = glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     volkInitialize();
@@ -682,7 +693,7 @@ s32 main(s32 argc, char* argv[])
         .vkBindImageMemory2KHR=                  vkBindImageMemory2KHR,
         .vkGetPhysicalDeviceMemoryProperties2KHR=vkGetPhysicalDeviceMemoryProperties2KHR,
     };
-    
+
     VmaAllocatorCreateInfo allocator_ci =
     {
         .physicalDevice = pd,
@@ -716,86 +727,7 @@ s32 main(s32 argc, char* argv[])
 
     VkSwapchainKHR swapchain = create_swapchain(pAllocator, device, surface, surface_capabilities, surface_format, extent, queue_family_index);
     redassert(swapchain);
-
-    VkImage swapchain_images[16];
-    u32 swapchain_image_count;
-    VKCHECK(vkGetSwapchainImagesKHR(device, swapchain, &swapchain_image_count, null));
-    VKCHECK(vkGetSwapchainImagesKHR(device, swapchain, &swapchain_image_count, swapchain_images));
-
-    VkImageView swapchain_image_views[16];
-
-    for (u32 i = 0; i < swapchain_image_count; i++)
-    {
-        VkImageViewCreateInfo create_info =
-        {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = swapchain_images[i],
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .components.r = VK_COMPONENT_SWIZZLE_R,
-            .components.g = VK_COMPONENT_SWIZZLE_G,
-            .components.b = VK_COMPONENT_SWIZZLE_B,
-            .components.a = VK_COMPONENT_SWIZZLE_A,
-            .format = surface_format.format,
-            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .subresourceRange.baseArrayLayer = 0,
-            .subresourceRange.baseMipLevel = 0,
-            .subresourceRange.layerCount = 1,
-            .subresourceRange.levelCount = 1,
-        };
-        
-        VKCHECK(vkCreateImageView(device, &create_info, pAllocator, &swapchain_image_views[i]));
-        redassert(swapchain_image_views[i]);
-    }
-
     VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
-    VkExtent3D depth_extent = 
-    {
-        .width = extent.width,
-        .height = extent.height,
-        .depth = 1,
-    };
-
-    VkImageCreateInfo depth_image_ci = image_create_info(depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depth_extent);
-
-    VmaAllocationCreateInfo depth_image_ai =
-    {
-        .usage = VMA_MEMORY_USAGE_GPU_ONLY,
-        .requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-    };
-
-    AllocatedImage depth_image = ZERO_INIT;
-
-    VKCHECK(vmaCreateImage(allocator, &depth_image_ci, &depth_image_ai, &depth_image.handle, &depth_image.allocation, null));
-
-    VkImageViewCreateInfo depth_image_view_ci = image_view_create_info(depth_format, depth_image.handle, VK_IMAGE_ASPECT_DEPTH_BIT);
-    VkImageView depth_image_view;
-    VKCHECK(vkCreateImageView(device, &depth_image_view_ci, pAllocator, &depth_image_view));
-
-    VkQueue queue;
-    u32 queue_index = 0;
-    vkGetDeviceQueue(device, queue_family_index, queue_index, &queue);
-    redassert(queue);
-
-    VkCommandPool command_pool;
-    VkCommandPoolCreateInfo command_pool_ci =
-    {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        .queueFamilyIndex = queue_family_index,
-        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-    };
-    VKCHECK(vkCreateCommandPool(device, &command_pool_ci, pAllocator, &command_pool));
-    redassert(command_pool);
-
-    VkCommandBuffer command_buffer;
-    VkCommandBufferAllocateInfo command_buffer_ai =
-    {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = command_pool,
-        .commandBufferCount = 1,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    };
-
-    VKCHECK(vkAllocateCommandBuffers(device, &command_buffer_ai, &command_buffer));
 
     VkAttachmentDescription color_attachment =
     {
@@ -855,20 +787,79 @@ s32 main(s32 argc, char* argv[])
     VkRenderPass render_pass;
     VKCHECK(vkCreateRenderPass(device, &rp_create_info, pAllocator, &render_pass));
 
+    VkExtent3D depth_extent = 
+    {
+        .width = extent.width,
+        .height = extent.height,
+        .depth = 1,
+    };
+
+    VkImageCreateInfo depth_image_ci = image_create_info(depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depth_extent);
+
+    VmaAllocationCreateInfo depth_image_ai =
+    {
+        .usage = VMA_MEMORY_USAGE_GPU_ONLY,
+        .requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    };
+
+    AllocatedImage depth_image = ZERO_INIT;
+
+    VKCHECK(vmaCreateImage(allocator, &depth_image_ci, &depth_image_ai, &depth_image.handle, &depth_image.allocation, null));
+
+    VkImageViewCreateInfo depth_image_view_ci = image_view_create_info(depth_format, depth_image.handle, VK_IMAGE_ASPECT_DEPTH_BIT);
+    VkImageView depth_image_view;
+    VKCHECK(vkCreateImageView(device, &depth_image_view_ci, pAllocator, &depth_image_view));
+
+    VkImage swapchain_images[4];
+    u32 swapchain_image_count;
+    VKCHECK(vkGetSwapchainImagesKHR(device, swapchain, &swapchain_image_count, null));
+    redassert(swapchain_image_count <= array_length(swapchain_images));
+    VKCHECK(vkGetSwapchainImagesKHR(device, swapchain, &swapchain_image_count, swapchain_images));
+
+    VkImageView swapchain_image_views[array_length(swapchain_images)];
+    VkFramebuffer framebuffers[array_length(swapchain_images)];
+
+    VkImageViewCreateInfo swapchain_image_view_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .components.r = VK_COMPONENT_SWIZZLE_R,
+        .components.g = VK_COMPONENT_SWIZZLE_G,
+        .components.b = VK_COMPONENT_SWIZZLE_B,
+        .components.a = VK_COMPONENT_SWIZZLE_A,
+        .format = surface_format.format,
+        .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .subresourceRange.baseArrayLayer = 0,
+        .subresourceRange.baseMipLevel = 0,
+        .subresourceRange.layerCount = 1,
+        .subresourceRange.levelCount = 1,
+    };
+
+    VkFramebufferCreateInfo fb_create_info =
+    {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+        .renderPass = render_pass,
+        .attachmentCount = 1,
+        .width = extent.width,
+        .height = extent.height,
+        .layers = 1,
+    };
+
+    for (u32 i = 0; i < swapchain_image_count; i++)
+    {
+        swapchain_image_view_ci.image = swapchain_images[i];
+        VKCHECK(vkCreateImageView(device, &swapchain_image_view_ci, pAllocator, &swapchain_image_views[i]));
+        redassert(swapchain_image_views[i]);
+        VkImageView attachments[] = { swapchain_image_views[i], depth_image_view };
+        fb_create_info.pAttachments = attachments;
+        fb_create_info.attachmentCount = array_length(attachments);
+        VKCHECK(vkCreateFramebuffer(device, &fb_create_info, pAllocator, &framebuffers[i]));
+    }
+
 #define MESH_PIPELINE_INDEX 0
     const u32 mesh_pipeline_index = MESH_PIPELINE_INDEX;
     ShaderProgram shader_programs[] =
     {
-        /*[0] =*/
-        /*{*/
-            /*.shaders[0] = "trianglev.spv",*/
-            /*.shaders[1] = "trianglef.spv",*/
-        /*},*/
-        /*[1] =*/
-        /*{*/
-            /*.shaders[0] = "triangle_color_v.spv",*/
-            /*.shaders[1] = "triangle_color_f.spv",*/
-        /*},*/
         [MESH_PIPELINE_INDEX] =
         {
             .shaders[0] = "triangle_meshv.spv",
@@ -1003,43 +994,59 @@ s32 main(s32 argc, char* argv[])
         graphics_pipelines_create_info[i] = (VkGraphicsPipelineCreateInfo) 
         {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-            .stageCount = shader_program_stage_count,
-            .pStages = pipeline_shaders_create_info[i].shader_stages,
-            .pVertexInputState = &vertex_input_state_ci,
-            .pInputAssemblyState = &input_assembly_ci,
-            .pViewportState = &viewport_state_ci,
-            .pRasterizationState = &rasterization_state_ci,
-            .pMultisampleState = &multisample_state_ci, 
-            .pColorBlendState = &color_blend_state_ci,
-            .pDepthStencilState = &depth_stencil_state_ci,
-            .layout = pipeline_layout,
-            .renderPass = render_pass,
-            .subpass = 0,
+                .stageCount = shader_program_stage_count,
+                .pStages = pipeline_shaders_create_info[i].shader_stages,
+                .pVertexInputState = &vertex_input_state_ci,
+                .pInputAssemblyState = &input_assembly_ci,
+                .pViewportState = &viewport_state_ci,
+                .pRasterizationState = &rasterization_state_ci,
+                .pMultisampleState = &multisample_state_ci, 
+                .pColorBlendState = &color_blend_state_ci,
+                .pDepthStencilState = &depth_stencil_state_ci,
+                .layout = pipeline_layout,
+                .renderPass = render_pass,
+                .subpass = 0,
         };
     }
 
     VkPipeline graphics_pipelines[array_length(shader_programs)];
     VKCHECK(vkCreateGraphicsPipelines(device, null, pipeline_count, graphics_pipelines_create_info, pAllocator, graphics_pipelines));
 
-    VkFramebufferCreateInfo fb_create_info =
+    Material materials[array_length(graphics_pipelines)];
+    u32 material_count = array_length(materials);
+
+    for (u32 i = 0; i < material_count; i++)
     {
-        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-        .renderPass = render_pass,
-        .attachmentCount = 1,
-        .width = extent.width,
-        .height = extent.height,
-        .layers = 1,
+        materials[i].pipeline = graphics_pipelines[i];
+        materials[i].layout = graphics_pipelines_create_info[i].layout;
+    }
+
+    VkQueue queue;
+    u32 queue_index = 0;
+    vkGetDeviceQueue(device, queue_family_index, queue_index, &queue);
+    redassert(queue);
+
+    VkCommandPool command_pool;
+    VkCommandPoolCreateInfo command_pool_ci =
+    {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = queue_family_index,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
     };
 
-    VkFramebuffer framebuffers[16];
+    VKCHECK(vkCreateCommandPool(device, &command_pool_ci, pAllocator, &command_pool));
+    redassert(command_pool);
 
-    for (u32 i = 0; i < swapchain_image_count; i++)
+    VkCommandBuffer command_buffer;
+    VkCommandBufferAllocateInfo command_buffer_ai =
     {
-        VkImageView attachments[] = { swapchain_image_views[i], depth_image_view };
-        fb_create_info.pAttachments = attachments;
-        fb_create_info.attachmentCount = array_length(attachments);
-        VKCHECK(vkCreateFramebuffer(device, &fb_create_info, pAllocator, &framebuffers[i]));
-    }
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = command_pool,
+        .commandBufferCount = 1,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    };
+
+    VKCHECK(vkAllocateCommandBuffers(device, &command_buffer_ai, &command_buffer));
 
     VkFenceCreateInfo fence_create_info =
     {
@@ -1081,8 +1088,9 @@ s32 main(s32 argc, char* argv[])
             });
 
     Mesh meshes[] = { monkey_mesh, triangle_mesh };
+    u32 mesh_count = array_length(meshes);
 
-    for (u32 i = 0; i < array_length(meshes); i++)
+    for (u32 i = 0; i < mesh_count; i++)
     {
         Mesh* mesh = &meshes[i];
         VkBufferCreateInfo buffer_ci =
@@ -1107,12 +1115,24 @@ s32 main(s32 argc, char* argv[])
         vmaUnmapMemory(allocator, mesh->buffer.allocation);
     }
 
+    mat4f model_matrices[array_length(graphics_pipelines) * array_length(meshes)];
     u32 frame_number = 0;
 
     while (!glfwWindowShouldClose(app.window.handle.glfw))
     {
         glfwPollEvents();
         print("************ NEW FRAME START ************\n");
+
+        for (u32 material_index = 0; material_index < material_count; material_index++)
+        {
+            for (u32 mesh_index = 0; mesh_index < mesh_count; mesh_index++)
+            {
+                mat4f model = rotate(MAT4_IDENTITY_INIT, rad(frame_number * 0.4f), (vec3f) {0,1,0});
+                u32 index = (material_index * mesh_count) + mesh_index;
+                model_matrices[index] = model;
+            }
+        }
+
 
         VKCHECK(vkWaitForFences(device, 1, &fence, true, 1000 * 1000 * 1000));
         VKCHECK(vkResetFences(device, 1, &fence));
@@ -1154,28 +1174,29 @@ s32 main(s32 argc, char* argv[])
         vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
         /***** BEGIN RENDER ******/
-#if 0
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipelines[selected_shader % MAX_SHADER_COUNT]);
-        vkCmdDraw(command_buffer, 3, 1, 0, 0);
-#else
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipelines[mesh_pipeline_index]);
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &meshes[space_selector % array_length(meshes)].buffer.handle, &offset);
 
         vec3f camera_pos = {0.f, 0.f, -2.f};
         mat4f view = translate(MAT4_IDENTITY_INIT, camera_pos);
         mat4f proj = perspective(rad(70.f), 1700.f / 900.f, 0.1f, 200.f);
         proj.row[1].v[1] *= -1;
-        mat4f model = rotate(MAT4_IDENTITY_INIT, rad(frame_number * 0.4f), (vec3f) {0,1,0});
+        mat4f proj_x_view = mat4f_mul(proj, view);
 
-        MeshPushConstants constants =
+        for (u32 material_index = 0; material_index < material_count; material_index++)
         {
-            .render_matrix = mat4f_mul(mat4f_mul(proj, view), model),
-        };
-
-        vkCmdPushConstants(command_buffer, graphics_pipelines_create_info[mesh_pipeline_index].layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
-        vkCmdDraw(command_buffer, meshes[space_selector % array_length(meshes)].vertices.len, 1, 0, 0);
-#endif
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, materials[material_index].pipeline);
+            for (u32 mesh_index = 0; mesh_index < mesh_count; mesh_index++)
+            {
+                const VkDeviceSize offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &meshes[mesh_index].buffer.handle, &offset);
+                u32 model_matrix_index = (material_index * mesh_count) + mesh_index;
+                MeshPushConstants constants =
+                {
+                    .render_matrix = mat4f_mul(proj_x_view, model_matrices[model_matrix_index]),
+                };
+                vkCmdPushConstants(command_buffer, materials[material_index].layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+                vkCmdDraw(command_buffer, meshes[mesh_index].vertices.len, 1, 0, 0);
+            }
+        }
         /***** END RENDER ******/
 
         vkCmdEndRenderPass(command_buffer);
