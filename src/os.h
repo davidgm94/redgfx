@@ -189,7 +189,7 @@ void os_abort(void);
 void os_exit(s32 code);
 void os_exit_with_message(const char* message, ...);
 void os_print_recorded_times(f64 total_ms);
-s64 os_performance_counter(void);
+u64 os_performance_counter(void);
 f64 os_compute_ms(u64 pc_start, u64 pc_end);
 s32 os_load_dynamic_library(const char* dyn_lib_name);
 void* os_load_procedure_from_dynamic_library(s32 dyn_lib_index, const char* proc_name);

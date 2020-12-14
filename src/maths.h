@@ -33,6 +33,7 @@
 /* for C only */
 #define MAT4_IDENTITY ((mat4f)MAT4_IDENTITY_INIT)
 #define MAT4_ZERO     ((mat4f)MAT4_ZERO_INIT)
+#define VEC3(x, y, z) (vec3f) { x, y, z }
 #define VEC3_RIGHT VEC3(1.0f, 0.0f, 0.0f)
 
 typedef union vec3f

@@ -75,6 +75,92 @@ typedef struct Renderable
 
 } Renderable;
 
+const f32 yaw = -90.0f;
+const f32 pitch = 0.0f;
+const f32 speed = 0.25f;
+const f32 sensitivity = 0.1f;
+const f32 zoom = 45.0f;
+
+typedef struct Camera
+{
+    vec3f position;
+    vec3f front;
+    vec3f right;
+    vec3f up;
+    vec3f world_up;
+    f32 movement_speed;
+    f32 last_x, last_y;
+    f32 yaw;
+    f32 pitch;
+    f32 mouse_sensitivity;
+    f32 zoom;
+} Camera;
+
+typedef enum CameraMovement
+{
+    CAMERA_MOVEMENT_FORWARD,
+    CAMERA_MOVEMENT_BACKWARD,
+    CAMERA_MOVEMENT_LEFT,
+    CAMERA_MOVEMENT_RIGHT,
+} CameraMovement;
+
+static inline void Camera_process_key(Camera* camera, CameraMovement movement, f32 delta_time)
+{
+    f32 velocity = camera->movement_speed * delta_time;
+    vec3f position = camera->position;
+    switch (movement)
+    {
+        case CAMERA_MOVEMENT_BACKWARD:
+        {
+            print("Camera backward\n");
+            vec3f front = camera->front;
+            camera->position = vec3_sub(position, vec3_scale(front, velocity));
+            break;
+        }
+        case CAMERA_MOVEMENT_FORWARD:
+        {
+            print("Camera forward\n");
+            vec3f front = camera->front;
+            camera->position = vec3_add(position, vec3_scale(front, velocity));
+            break;
+        }
+        case CAMERA_MOVEMENT_LEFT:
+        {
+            print("Camera left\n");
+            vec3f right = camera->right;
+            camera->position = vec3_sub(position, vec3_scale(right, velocity));
+            break;
+        }
+        case CAMERA_MOVEMENT_RIGHT:
+        {
+            print("Camera right\n");
+            vec3f right = camera->right;
+            camera->position = vec3_add(position, vec3_scale(right, velocity));
+            break;
+        }
+        default:
+            RED_UNREACHABLE;
+            break;
+    }
+}
+
+static inline void Camera_update_vectors(Camera* camera)
+{
+    f32 rad_yaw = rad(camera->yaw);
+    f32 rad_pitch = rad(camera->pitch);
+    f32 cos_rad_pitch = cosf(rad_pitch);
+    vec3f front =
+    {
+        .x = cosf(rad_yaw) * cos_rad_pitch,
+        .y = sinf(rad_pitch),
+        .z = sinf(rad_yaw) * cos_rad_pitch,
+    };
+
+    camera->front = vec3_normalize(front);
+    camera->right = vec3_normalize(vec3_cross(camera->front, camera->world_up));
+    camera->up = vec3_normalize(vec3_cross(camera->front, camera->up));
+}
+
 typedef struct Application
 {
     struct
@@ -87,9 +173,11 @@ typedef struct Application
     } window;
     char* title;
     u32 version;
+    Camera camera;
+    f32 delta_time;
 } Application;
 
-#define VKCHECK(_result) do { VkResult result = _result; if (result == VK_SUCCESS) { print("%s OK\n", #_result); } else { print("%s FAIL! %s\n", #_result, VKResultToString(_result)); redassert(result == VK_SUCCESS); } } while(false);
+#define VKCHECK(_result) do { VkResult result = _result; if (result == VK_SUCCESS) { /*print("%s OK\n", #_result);*/ } else { print("%s FAIL! %s\n", #_result, VKResultToString(_result)); redassert(result == VK_SUCCESS); } } while(false);
 
 static inline const char* VKResultToString(VkResult result)
 {
@@ -517,28 +605,64 @@ static Mesh mesh_load(const char* path)
 
 static void glfw_key_callback(GLFWwindow* window, s32 key, s32 scan_code, s32 action, s32 mods)
 {
-    if (action == GLFW_PRESS)
+    Application* app = glfwGetWindowUserPointer(window);
+    if (app)
     {
-        switch (key)
+        if (action == GLFW_PRESS || action == GLFW_REPEAT)
         {
-            case GLFW_KEY_SPACE:
-                space_selector++;
-                break;
-            default:
-                break;
+            switch (key)
+            {
+                case GLFW_KEY_W:
+                    Camera_process_key(&app->camera, CAMERA_MOVEMENT_FORWARD, app->delta_time);
+                    break;
+                case GLFW_KEY_A:
+                    Camera_process_key(&app->camera, CAMERA_MOVEMENT_LEFT, app->delta_time);
+                    break;
+                case GLFW_KEY_S:
+                    Camera_process_key(&app->camera, CAMERA_MOVEMENT_BACKWARD, app->delta_time);
+                    break;
+                case GLFW_KEY_D:
+                    Camera_process_key(&app->camera, CAMERA_MOVEMENT_RIGHT, app->delta_time);
+                    break;
+                default:
+                    break;
+            }
         }
     }
 }
 
+static inline Camera Camera_init(void)
+{
+    Camera camera =
+    {
+        .position = VEC3(0.0f, 0.0f, 3.0f),
+        .front = VEC3(0.0f, 0.0f, -1.0f),
+        .up = VEC3(0.00f, 0.0f, 1.0f),
+        .world_up = VEC3(0.01f, 1.0f, 0.0f),
+        .yaw = yaw,
+        .pitch = pitch,
+        .movement_speed = speed,
+        .mouse_sensitivity = sensitivity,
+        .zoom = zoom,
+    };
+    Camera_update_vectors(&app.camera);
+    return camera;
+}
+
 s32 main(s32 argc, char* argv[])
 {
+    os_init();
+
     Application app =
     {
         .title = "Hello world",
         .window.width = 1024,
         .window.height = 768, 
         .version = 1,
+        .delta_time = 0,
+        .camera = Camera_init(),
     };
+
 
     s32 result = glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -547,6 +671,7 @@ s32 main(s32 argc, char* argv[])
     app.window.handle.glfw = glfwCreateWindow(app.window.width, app.window.height, app.title, NULL, NULL);
     redassert(app.window.handle.glfw);
     glfwSetKeyCallback(app.window.handle.glfw, glfw_key_callback);
+    glfwSetWindowUserPointer(app.window.handle.glfw, &app);
 
     VkAllocationCallbacks* pAllocator = NULL;
 
@@ -1067,27 +1192,8 @@ s32 main(s32 argc, char* argv[])
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &present_sem));
 
     Mesh monkey_mesh = mesh_load("../assets/monkey_flat.obj");
-    Mesh triangle_mesh = ZERO_INIT;
-    vertices_append(&triangle_mesh.vertices,
-            (Vertex)
-            {
-            .position = { 1.f, 1.f, 0, },
-            .color = { 0.f, 1.f, 0, },
-            });
-    vertices_append(&triangle_mesh.vertices,
-            (Vertex)
-            {
-            .position = { -1.0f, 1.f, 0, },
-            .color = { 0.f, 1.f, 0, },
-            });
-    vertices_append(&triangle_mesh.vertices,
-            (Vertex)
-            {
-            .position = { 0, -1.f, 0, },
-            .color = { 0.f, 1.f, 0, },
-            });
-
-    Mesh meshes[] = { monkey_mesh, triangle_mesh };
+    //Mesh mario_mesh = mesh_load("../assets/mario.obj");
+    Mesh meshes[] = { monkey_mesh };
     u32 mesh_count = array_length(meshes);
 
     for (u32 i = 0; i < mesh_count; i++)
@@ -1118,10 +1224,15 @@ s32 main(s32 argc, char* argv[])
     mat4f model_matrices[array_length(graphics_pipelines) * array_length(meshes)];
     u32 frame_number = 0;
 
+    u64 frame_counter = os_performance_counter();
     while (!glfwWindowShouldClose(app.window.handle.glfw))
     {
+        u64 internal_frame_counter = os_performance_counter();
+        app.delta_time = os_compute_ms(frame_counter, internal_frame_counter);
+        print("PREVIOUS: %u, CURRENT: %u, DELTA: %.02f ms.\n", frame_counter, internal_frame_counter, app.delta_time);
+        frame_counter = internal_frame_counter;
+        
         glfwPollEvents();
-        print("************ NEW FRAME START ************\n");
 
         for (u32 material_index = 0; material_index < material_count; material_index++)
         {
@@ -1133,6 +1244,10 @@ s32 main(s32 argc, char* argv[])
             }
         }
 
+        mat4f proj = perspective(rad(app.camera.zoom), (f32)app.window.width / (f32)app.window.height, 0.1, 100.0f);
+        proj.row[1].v[1] *= -1;
+        mat4f view = lookat(app.camera.position, vec3_add(app.camera.position, app.camera.front), app.camera.up);
+        mat4f proj_x_view = mat4f_mul(proj, view);
 
         VKCHECK(vkWaitForFences(device, 1, &fence, true, 1000 * 1000 * 1000));
         VKCHECK(vkResetFences(device, 1, &fence));
@@ -1175,12 +1290,6 @@ s32 main(s32 argc, char* argv[])
 
         /***** BEGIN RENDER ******/
 
-        vec3f camera_pos = {0.f, 0.f, -2.f};
-        mat4f view = translate(MAT4_IDENTITY_INIT, camera_pos);
-        mat4f proj = perspective(rad(70.f), 1700.f / 900.f, 0.1f, 200.f);
-        proj.row[1].v[1] *= -1;
-        mat4f proj_x_view = mat4f_mul(proj, view);
-
         for (u32 material_index = 0; material_index < material_count; material_index++)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, materials[material_index].pipeline);
@@ -1197,6 +1306,7 @@ s32 main(s32 argc, char* argv[])
                 vkCmdDraw(command_buffer, meshes[mesh_index].vertices.len, 1, 0, 0);
             }
         }
+
         /***** END RENDER ******/
 
         vkCmdEndRenderPass(command_buffer);

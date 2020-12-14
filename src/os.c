@@ -309,14 +309,19 @@ void os_abort(void)
     abort();
 }
 
-#ifdef RED_OS_WINDOWS
-s64 os_performance_counter(void)
+u64 os_performance_counter(void)
 {
-    s64 pc;
+#ifdef RED_OS_WINDOWS
+    u64 pc;
     QueryPerformanceCounter((LARGE_INTEGER*)&pc);
     return pc;
-}
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    u64 counter = (u64)ts.tv_sec * 1000000000 + (u64)ts.tv_nsec;
+    return counter;
 #endif
+}
 
 f64 os_compute_ms(u64 pc_start, u64 pc_end)
 {
