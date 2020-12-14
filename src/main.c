@@ -70,15 +70,10 @@ typedef struct Material
     VkPipelineLayout layout;
 } Material;
 
-typedef struct Renderable
-{
-
-} Renderable;
-
 const f32 yaw = -90.0f;
 const f32 pitch = 0.0f;
-const f32 speed = 0.25f;
-const f32 sensitivity = 0.1f;
+const f32 speed = 0.10f;
+const f32 sensitivity = 0.1;
 const f32 zoom = 45.0f;
 
 typedef struct Camera
@@ -87,7 +82,6 @@ typedef struct Camera
     vec3f front;
     vec3f right;
     vec3f up;
-    vec3f world_up;
     f32 movement_speed;
     f32 last_x, last_y;
     f32 yaw;
@@ -144,23 +138,6 @@ static inline void Camera_process_key(Camera* camera, CameraMovement movement, f
     }
 }
 
-static inline void Camera_update_vectors(Camera* camera)
-{
-    f32 rad_yaw = rad(camera->yaw);
-    f32 rad_pitch = rad(camera->pitch);
-    f32 cos_rad_pitch = cosf(rad_pitch);
-    vec3f front =
-    {
-        .x = cosf(rad_yaw) * cos_rad_pitch,
-        .y = sinf(rad_pitch),
-        .z = sinf(rad_yaw) * cos_rad_pitch,
-    };
-
-    camera->front = vec3_normalize(front);
-    camera->right = vec3_normalize(vec3_cross(camera->front, camera->world_up));
-    camera->up = vec3_normalize(vec3_cross(camera->front, camera->up));
-}
-
 typedef struct Application
 {
     struct
@@ -175,6 +152,7 @@ typedef struct Application
     u32 version;
     Camera camera;
     f32 delta_time;
+    bool first_mouse;
 } Application;
 
 #define VKCHECK(_result) do { VkResult result = _result; if (result == VK_SUCCESS) { /*print("%s OK\n", #_result);*/ } else { print("%s FAIL! %s\n", #_result, VKResultToString(_result)); redassert(result == VK_SUCCESS); } } while(false);
@@ -603,31 +581,89 @@ static Mesh mesh_load(const char* path)
     return mesh;
 }
 
-static void glfw_key_callback(GLFWwindow* window, s32 key, s32 scan_code, s32 action, s32 mods)
+static void glfw_mouse_callback(GLFWwindow* window, double x, double y)
 {
-    Application* app = glfwGetWindowUserPointer(window);
-    if (app)
+    Application* app = (Application*) glfwGetWindowUserPointer(window);
+    if (app->first_mouse)
     {
-        if (action == GLFW_PRESS || action == GLFW_REPEAT)
-        {
-            switch (key)
-            {
-                case GLFW_KEY_W:
-                    Camera_process_key(&app->camera, CAMERA_MOVEMENT_FORWARD, app->delta_time);
-                    break;
-                case GLFW_KEY_A:
-                    Camera_process_key(&app->camera, CAMERA_MOVEMENT_LEFT, app->delta_time);
-                    break;
-                case GLFW_KEY_S:
-                    Camera_process_key(&app->camera, CAMERA_MOVEMENT_BACKWARD, app->delta_time);
-                    break;
-                case GLFW_KEY_D:
-                    Camera_process_key(&app->camera, CAMERA_MOVEMENT_RIGHT, app->delta_time);
-                    break;
-                default:
-                    break;
-            }
-        }
+        app->camera.last_x = x;
+        app->camera.last_y = y;
+        app->first_mouse = false;
+    }
+
+    f32 x_offset = (x - app->camera.last_x) * app->camera.mouse_sensitivity;
+    f32 y_offset = (y - app->camera.last_y) * app->camera.mouse_sensitivity;
+
+    app->camera.last_x = x;
+    app->camera.last_y = y;
+
+    app->camera.yaw += x_offset;
+    app->camera.pitch -= y_offset;
+}
+
+static inline mat4f Camera_update_view(Camera* camera)
+{
+    camera->pitch = MIN(camera->pitch, 89.0f);
+    camera->pitch = MAX(camera->pitch, -89.0f);
+
+    camera->front.x = -sinf(rad(camera->yaw)) * cosf(rad(camera->pitch));
+    camera->front.y = sinf(rad(camera->pitch));
+    camera->front.z = cosf(rad(camera->yaw)) * cosf(rad(camera->pitch));
+
+    camera->front = vec3_normalize(camera->front);
+    camera->right = vec3_normalize(vec3_cross(VEC3(0, 1.f, 0), camera->front));
+    camera->up = vec3_normalize(vec3_cross(camera->front, camera->right));
+
+    mat4f view_mat = lookat(camera->position, vec3_add(camera->position, camera->front), camera->up);
+    mat4f_print(view_mat);
+    return view_mat;
+}
+
+static inline void Camera_process_scroll(Camera* camera, f32 offset)
+{
+    camera->zoom -= offset;
+    if (camera->zoom < 1.0f)
+    {
+        camera->zoom = 1.0f;
+    }
+    if (camera->zoom > 45.0f)
+    {
+        camera->zoom = 45.0f;
+    }
+}
+
+static void glfw_scroll_callback(GLFWwindow* window, double x, double y)
+{
+    Application* app = (Application*) glfwGetWindowUserPointer(window);
+    Camera_process_scroll(&app->camera, y);
+}
+
+static void app_handle_input(Application* app)
+{
+    f32 camera_speed = app->camera.movement_speed * app->delta_time;
+
+    GLFWwindow* window = app->window.handle.glfw;
+
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    {
+        glfwSetWindowShouldClose(window, true);
+        return;
+    }
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+    {
+        app->camera.position = vec3_add(app->camera.position, vec3_scale(app->camera.front, camera_speed));
+    }
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    {
+        app->camera.position = vec3_sub(app->camera.position, vec3_scale(app->camera.front, camera_speed));
+    }
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+    {
+        app->camera.position = vec3_add(app->camera.position, vec3_scale(app->camera.right, camera_speed));
+    }
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+    {
+        app->camera.position = vec3_sub(app->camera.position, vec3_scale(app->camera.right, camera_speed));
     }
 }
 
@@ -635,17 +671,13 @@ static inline Camera Camera_init(void)
 {
     Camera camera =
     {
-        .position = VEC3(0.0f, 0.0f, 3.0f),
-        .front = VEC3(0.0f, 0.0f, -1.0f),
-        .up = VEC3(0.00f, 0.0f, 1.0f),
-        .world_up = VEC3(0.01f, 1.0f, 0.0f),
-        .yaw = yaw,
-        .pitch = pitch,
+        .position = VEC3(0.0f, 0.0f, -20.0f),
+        .yaw = 0.0f,
+        .pitch = 0.0f,
         .movement_speed = speed,
         .mouse_sensitivity = sensitivity,
         .zoom = zoom,
     };
-    Camera_update_vectors(&app.camera);
     return camera;
 }
 
@@ -661,8 +693,8 @@ s32 main(s32 argc, char* argv[])
         .version = 1,
         .delta_time = 0,
         .camera = Camera_init(),
+        .first_mouse = true,
     };
-
 
     s32 result = glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -670,8 +702,9 @@ s32 main(s32 argc, char* argv[])
     redassert(result == GLFW_TRUE);
     app.window.handle.glfw = glfwCreateWindow(app.window.width, app.window.height, app.title, NULL, NULL);
     redassert(app.window.handle.glfw);
-    glfwSetKeyCallback(app.window.handle.glfw, glfw_key_callback);
     glfwSetWindowUserPointer(app.window.handle.glfw, &app);
+    glfwSetCursorPosCallback(app.window.handle.glfw, glfw_mouse_callback);
+    glfwSetScrollCallback(app.window.handle.glfw, glfw_scroll_callback);
 
     VkAllocationCallbacks* pAllocator = NULL;
 
@@ -1192,8 +1225,8 @@ s32 main(s32 argc, char* argv[])
     VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &present_sem));
 
     Mesh monkey_mesh = mesh_load("../assets/monkey_flat.obj");
-    //Mesh mario_mesh = mesh_load("../assets/mario.obj");
-    Mesh meshes[] = { monkey_mesh };
+    Mesh mario_mesh = mesh_load("../assets/mario.obj");
+    Mesh meshes[] = { mario_mesh };
     u32 mesh_count = array_length(meshes);
 
     for (u32 i = 0; i < mesh_count; i++)
@@ -1229,10 +1262,12 @@ s32 main(s32 argc, char* argv[])
     {
         u64 internal_frame_counter = os_performance_counter();
         app.delta_time = os_compute_ms(frame_counter, internal_frame_counter);
-        print("PREVIOUS: %u, CURRENT: %u, DELTA: %.02f ms.\n", frame_counter, internal_frame_counter, app.delta_time);
+        //print("PREVIOUS: %u, CURRENT: %u, DELTA: %.02f ms.\n", frame_counter, internal_frame_counter, app.delta_time);
         frame_counter = internal_frame_counter;
         
         glfwPollEvents();
+
+        app_handle_input(&app);
 
         for (u32 material_index = 0; material_index < material_count; material_index++)
         {
@@ -1246,7 +1281,7 @@ s32 main(s32 argc, char* argv[])
 
         mat4f proj = perspective(rad(app.camera.zoom), (f32)app.window.width / (f32)app.window.height, 0.1, 100.0f);
         proj.row[1].v[1] *= -1;
-        mat4f view = lookat(app.camera.position, vec3_add(app.camera.position, app.camera.front), app.camera.up);
+        mat4f view = Camera_update_view(&app.camera);
         mat4f proj_x_view = mat4f_mul(proj, view);
 
         VKCHECK(vkWaitForFences(device, 1, &fence, true, 1000 * 1000 * 1000));

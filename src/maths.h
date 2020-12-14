@@ -1,5 +1,6 @@
 #define SIMD 0
 #include "types.h"
+#include "os.h"
 #include <math.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -549,5 +550,19 @@ static inline mat4f mat4f_mul(mat4f a, mat4f b)
     dest.row[3].v[3] = a03 * b30 + a13 * b31 + a23 * b32 + a33 * b33;
 
     return dest;
+#endif
+}
+
+void mat4f_print(mat4f m)
+{
+#if SIMD
+    RED_NOT_IMPLEMENTED;
+#else
+    print("Printing matrix:\n");
+    print("Row 0: [ %f, %f, %f, %f ]\n", m.r0.x, m.r0.y, m.r0.z, m.r0.w);
+    print("Row 1: [ %f, %f, %f, %f ]\n", m.r1.x, m.r1.y, m.r1.z, m.r1.w);
+    print("Row 2: [ %f, %f, %f, %f ]\n", m.r2.x, m.r2.y, m.r2.z, m.r2.w);
+    print("Row 3: [ %f, %f, %f, %f ]\n", m.r3.x, m.r3.y, m.r3.z, m.r3.w);
+    print("\n");
 #endif
 }
