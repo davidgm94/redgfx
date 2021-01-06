@@ -189,7 +189,6 @@ static inline const char* VKResultToString(VkResult result)
         CASE_TO_STR(VK_ERROR_INCOMPATIBLE_DISPLAY_KHR);
         CASE_TO_STR(VK_ERROR_VALIDATION_FAILED_EXT);
         CASE_TO_STR(VK_ERROR_INVALID_SHADER_NV);
-        CASE_TO_STR(VK_ERROR_INCOMPATIBLE_VERSION_KHR);
         CASE_TO_STR(VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT);
         CASE_TO_STR(VK_ERROR_NOT_PERMITTED_EXT);
         CASE_TO_STR(VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT);
@@ -681,6 +680,44 @@ static inline Camera Camera_init(void)
     return camera;
 }
 
+typedef struct Frame
+{
+    struct
+    {
+        VkSemaphore present_sem, render_sem;
+        VkFence render_fence;
+        VkCommandPool command_pool;
+        VkCommandBuffer command_buffer;
+    } sync;
+
+    AllocatedBuffer camera_buffer;
+    VkDescriptorSet global_descriptor;
+} Frame;
+
+#define FRAME_OVERLAP (2)
+const u32 frame_overlap = FRAME_OVERLAP;
+
+static inline AllocatedBuffer create_buffer(VmaAllocator allocator, usize allocation_size, VkBufferUsageFlags usage, VmaMemoryUsage memory_usage)
+{
+    VkBufferCreateInfo ci = 
+    {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = allocation_size,
+        .usage = usage,
+    };
+
+    VmaAllocationCreateInfo ai =
+    {
+        .usage = memory_usage,
+    };
+
+    AllocatedBuffer buffer;
+
+    VKCHECK(vmaCreateBuffer(allocator, &ci, &ai, &buffer.handle, &buffer.allocation, null));
+
+    return buffer;
+}
+
 s32 main(s32 argc, char* argv[])
 {
     os_init();
@@ -695,6 +732,8 @@ s32 main(s32 argc, char* argv[])
         .camera = Camera_init(),
         .first_mouse = true,
     };
+
+    Frame frame[FRAME_OVERLAP] = ZERO_INIT;
 
     s32 result = glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -1184,7 +1223,6 @@ s32 main(s32 argc, char* argv[])
     vkGetDeviceQueue(device, queue_family_index, queue_index, &queue);
     redassert(queue);
 
-    VkCommandPool command_pool;
     VkCommandPoolCreateInfo command_pool_ci =
     {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -1192,37 +1230,39 @@ s32 main(s32 argc, char* argv[])
         .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
     };
 
-    VKCHECK(vkCreateCommandPool(device, &command_pool_ci, pAllocator, &command_pool));
-    redassert(command_pool);
-
-    VkCommandBuffer command_buffer;
-    VkCommandBufferAllocateInfo command_buffer_ai =
+    for (u32 i = 0; i < frame_overlap; i++)
     {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = command_pool,
-        .commandBufferCount = 1,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    };
+        VKCHECK(vkCreateCommandPool(device, &command_pool_ci, pAllocator, &frame[i].sync.command_pool));
+        redassert(frame[i].sync.command_pool);
+        VkCommandBufferAllocateInfo command_buffer_ai =
+        {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = frame[i].sync.command_pool,
+            .commandBufferCount = 1,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        };
 
-    VKCHECK(vkAllocateCommandBuffers(device, &command_buffer_ai, &command_buffer));
+        VKCHECK(vkAllocateCommandBuffers(device, &command_buffer_ai, &frame[i].sync.command_buffer));
 
-    VkFenceCreateInfo fence_create_info =
+        VkFenceCreateInfo fence_create_info =
+        {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+        };
+
+        VKCHECK(vkCreateFence(device, &fence_create_info, pAllocator, &frame[i].sync.render_fence));
+        VkSemaphoreCreateInfo sem_create_info =
+        {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        };
+
+        VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &frame[i].sync.render_sem));
+        VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &frame[i].sync.present_sem));
+    }
+
+    for (u32 i = 0; i < frame_overlap; i++)
     {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT,
-    };
-
-    VkFence fence;
-    VKCHECK(vkCreateFence(device, &fence_create_info, pAllocator, &fence));
-
-    VkSemaphoreCreateInfo sem_create_info =
-    {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-    };
-
-    VkSemaphore render_sem, present_sem;
-    VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &render_sem));
-    VKCHECK(vkCreateSemaphore(device, &sem_create_info, pAllocator, &present_sem));
+    }
 
     Mesh monkey_mesh = mesh_load("../assets/monkey_flat.obj");
     Mesh mario_mesh = mesh_load("../assets/mario.obj");
@@ -1232,19 +1272,7 @@ s32 main(s32 argc, char* argv[])
     for (u32 i = 0; i < mesh_count; i++)
     {
         Mesh* mesh = &meshes[i];
-        VkBufferCreateInfo buffer_ci =
-        {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = mesh->vertices.len * sizeof(Vertex),
-            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        };
-
-        VmaAllocationCreateInfo vma_ai =
-        {
-            .usage = VMA_MEMORY_USAGE_CPU_TO_GPU,
-        };
-
-        VKCHECK(vmaCreateBuffer(allocator, &buffer_ci, &vma_ai, &mesh->buffer.handle, &mesh->buffer.allocation, null));
+        mesh->buffer = create_buffer(allocator, mesh->vertices.len * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
         void* data;
         VKCHECK(vmaMapMemory(allocator, mesh->buffer.allocation, &data));
@@ -1264,6 +1292,7 @@ s32 main(s32 argc, char* argv[])
         app.delta_time = os_compute_ms(frame_counter, internal_frame_counter);
         //print("PREVIOUS: %u, CURRENT: %u, DELTA: %.02f ms.\n", frame_counter, internal_frame_counter, app.delta_time);
         frame_counter = internal_frame_counter;
+        const u32 frame_index = frame_number % frame_overlap;
         
         glfwPollEvents();
 
@@ -1284,13 +1313,13 @@ s32 main(s32 argc, char* argv[])
         mat4f view = Camera_update_view(&app.camera);
         mat4f proj_x_view = mat4f_mul(proj, view);
 
-        VKCHECK(vkWaitForFences(device, 1, &fence, true, 1000 * 1000 * 1000));
-        VKCHECK(vkResetFences(device, 1, &fence));
+        VKCHECK(vkWaitForFences(device, 1, &frame[frame_index].sync.render_fence, true, 1000 * 1000 * 1000));
+        VKCHECK(vkResetFences(device, 1, &frame[frame_index].sync.render_fence));
 
         u32 swapchain_image_index;
-        VKCHECK(vkAcquireNextImageKHR(device, swapchain, 0, present_sem, null, &swapchain_image_index));
+        VKCHECK(vkAcquireNextImageKHR(device, swapchain, 0, frame[frame_index].sync.present_sem, null, &swapchain_image_index));
 
-        VKCHECK(vkResetCommandBuffer(command_buffer, 0));
+        VKCHECK(vkResetCommandBuffer(frame[frame_index].sync.command_buffer, 0));
 
         VkCommandBufferBeginInfo begin_info =
         {
@@ -1298,11 +1327,11 @@ s32 main(s32 argc, char* argv[])
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         };
 
-        VKCHECK(vkBeginCommandBuffer(command_buffer, &begin_info));
+        VKCHECK(vkBeginCommandBuffer(frame[frame_index].sync.command_buffer, &begin_info));
 
         VkClearValue color_clear = ZERO_INIT;
         f32 flash = (f32)fabs(sin(frame_number / 120.f));
-        color_clear.color = (VkClearColorValue) { { 0.0f, 0.0f, flash, 1.0f} };
+        color_clear.color = (VkClearColorValue) { { 0.0f, 0.0f, 0.0f, 1.0f} };
 
         VkClearValue depth_clear =
         {
@@ -1321,31 +1350,31 @@ s32 main(s32 argc, char* argv[])
             .clearValueCount = array_length(clear_values),
         };
 
-        vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(frame[frame_index].sync.command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
         /***** BEGIN RENDER ******/
 
         for (u32 material_index = 0; material_index < material_count; material_index++)
         {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, materials[material_index].pipeline);
+            vkCmdBindPipeline(frame[frame_index].sync.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, materials[material_index].pipeline);
             for (u32 mesh_index = 0; mesh_index < mesh_count; mesh_index++)
             {
                 const VkDeviceSize offset = 0;
-                vkCmdBindVertexBuffers(command_buffer, 0, 1, &meshes[mesh_index].buffer.handle, &offset);
+                vkCmdBindVertexBuffers(frame[frame_index].sync.command_buffer, 0, 1, &meshes[mesh_index].buffer.handle, &offset);
                 u32 model_matrix_index = (material_index * mesh_count) + mesh_index;
                 MeshPushConstants constants =
                 {
                     .render_matrix = mat4f_mul(proj_x_view, model_matrices[model_matrix_index]),
                 };
-                vkCmdPushConstants(command_buffer, materials[material_index].layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
-                vkCmdDraw(command_buffer, meshes[mesh_index].vertices.len, 1, 0, 0);
+                vkCmdPushConstants(frame[frame_index].sync.command_buffer, materials[material_index].layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+                vkCmdDraw(frame[frame_index].sync.command_buffer, meshes[mesh_index].vertices.len, 1, 0, 0);
             }
         }
 
         /***** END RENDER ******/
 
-        vkCmdEndRenderPass(command_buffer);
-        VKCHECK(vkEndCommandBuffer(command_buffer));
+        vkCmdEndRenderPass(frame[frame_index].sync.command_buffer);
+        VKCHECK(vkEndCommandBuffer(frame[frame_index].sync.command_buffer));
 
         VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo submit_info =
@@ -1353,21 +1382,21 @@ s32 main(s32 argc, char* argv[])
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pWaitDstStageMask = &wait_stage,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &present_sem,
+            .pWaitSemaphores = &frame[frame_index].sync.present_sem,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &render_sem,
+            .pSignalSemaphores = &frame[frame_index].sync.render_sem,
             .commandBufferCount = 1,
-            .pCommandBuffers = &command_buffer,
+            .pCommandBuffers = &frame[frame_index].sync.command_buffer,
         };
 
-        VKCHECK(vkQueueSubmit(queue, 1, &submit_info, fence));
+        VKCHECK(vkQueueSubmit(queue, 1, &submit_info, frame[frame_index].sync.render_fence));
 
         VkPresentInfoKHR present_info =
         {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pSwapchains = &swapchain,
             .swapchainCount = 1,
-            .pWaitSemaphores = &render_sem,
+            .pWaitSemaphores = &frame[frame_index].sync.render_sem,
             .waitSemaphoreCount = 1,
             .pImageIndices = &swapchain_image_index,
         };
@@ -1379,12 +1408,16 @@ s32 main(s32 argc, char* argv[])
         //return 0;
     }
 
-    VKCHECK(vkWaitForFences(device, 1, &fence, true, 1000 * 1000 * 1000));
-    vkDestroyFence(device, fence, pAllocator);
-    vkDestroySemaphore(device, render_sem, pAllocator);
-    vkDestroySemaphore(device, present_sem, pAllocator);
-    vkFreeCommandBuffers(device, command_pool, 1, &command_buffer);
-    vkDestroyCommandPool(device, command_pool, pAllocator);
+    for (u32 i = 0; i < frame_overlap; i++)
+    {
+        VKCHECK(vkWaitForFences(device, 1, &frame[i].sync.render_fence, true, 1000 * 1000 * 1000));
+        vkDestroyFence(device, frame[i].sync.render_fence, pAllocator);
+        vkDestroySemaphore(device, frame[i].sync.render_sem, pAllocator);
+        vkDestroySemaphore(device, frame[i].sync.present_sem, pAllocator);
+        vkFreeCommandBuffers(device, frame[i].sync.command_pool, 1, &frame[i].sync.command_buffer);
+        vkDestroyCommandPool(device, frame[i].sync.command_pool, pAllocator);
+    }
+
     for (u32 i = 0; i < pipeline_count; i++)
     {
         u32 stage_count = graphics_pipelines_create_info[i].stageCount;
